@@ -1,26 +1,83 @@
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8f7f2;
+  --foreground: #0c1c15;
+  --card-bg: #ffffff;
+  --card-border: #e6e2d6;
+  --emerald-primary: #0f4c3a;
+  --emerald-hover: #0a382a;
+  --emerald-accent: #10b981;
+  --emerald-tint: #ecfdf5;
+  --amber-accent: #f59e0b;
+  --amber-tint: #fffbeb;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Space Grotesk", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Subtle dot-grid pattern for human, textured feel */
+.bg-grid-pattern {
+  background-size: 24px 24px;
+  background-image: radial-gradient(circle, #cbd5e1 1px, transparent 1px);
+}
+
+.bg-dot-warm {
+  background-size: 28px 28px;
+  background-image: radial-gradient(circle, rgba(15, 76, 58, 0.08) 1.2px, transparent 1.2px);
+}
+
+/* Card tactile hover elevation */
+.card-hover {
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
+}
+.card-hover:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 30px -10px rgba(12, 28, 21, 0.08), 0 4px 12px -2px rgba(12, 28, 21, 0.04);
+}
+
+/* Custom polished scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f1efe8;
+}
+::-webkit-scrollbar-thumb {
+  background: #c8d3cc;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #9bb2a4;
+}
+
+/* Pulse animation for live badge */
+@keyframes livePulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(1.15);
+  }
+}
+.live-pulse {
+  animation: livePulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
