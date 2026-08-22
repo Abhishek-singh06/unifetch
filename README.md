@@ -2,7 +2,7 @@
 
 # 📦 UniFetch
 ### The Student-Powered Peer Parcel Network for College Campuses
-Open **[http://localhost:3000](https://unifetch.netlify.app/)** in your browser!
+Open **(https://unifetch.netlify.app/)** in your browser!
 
 [![Next.js](https://img.shields.io/badge/Next.js-16.3-black?style=for-the-badge&logo=next.js)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19.0-blue?style=for-the-badge&logo=react)](https://react.dev/)
