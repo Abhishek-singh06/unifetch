@@ -20,29 +20,29 @@ export default function VerificationPage() {
   const [processingId, setProcessingId] = useState("");
 
   useEffect(() => {
-    loadProfiles();
-  }, []);
+    async function loadProfiles() {
+      setIsLoading(true);
+      setErrorMessage("");
 
-  async function loadProfiles() {
-    setIsLoading(true);
-    setErrorMessage("");
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("id, full_name, college, college_id_url, verification_status, created_at")
+        .eq("verification_status", "pending")
+        .order("created_at", { ascending: false });
 
-    const { data, error } = await supabase
-      .from("profiles")
-      .select("id, full_name, college, college_id_url, verification_status, created_at")
-      .eq("verification_status", "pending")
-      .order("created_at", { ascending: false });
+      if (error) {
+        console.error("Error loading profiles:", error);
+        setErrorMessage(error.message);
+        setIsLoading(false);
+        return;
+      }
 
-    if (error) {
-      console.error("Error loading profiles:", error);
-      setErrorMessage(error.message);
+      setProfiles(data || []);
       setIsLoading(false);
-      return;
     }
 
-    setProfiles(data || []);
-    setIsLoading(false);
-  }
+    loadProfiles();
+  }, []);
 
   async function verifyUser(id: string) {
     setProcessingId(id);
@@ -50,7 +50,7 @@ export default function VerificationPage() {
     const { error } = await supabase
       .from("profiles")
       .update({
-        verification_status: "verified",
+        verification_status: "approved",
       })
       .eq("id", id);
 
@@ -91,7 +91,7 @@ export default function VerificationPage() {
     }
 
     const { data, error } = await supabase.storage
-      .from("college-ids")
+      .from("student-ids")
       .createSignedUrl(filePath, 60 * 10);
 
     if (error) {

@@ -18,39 +18,39 @@ export default function VerificationPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    loadProfile();
-  }, []);
+    async function loadProfile() {
+      setIsLoading(true);
+      setError("");
 
-  async function loadProfile() {
-    setIsLoading(true);
-    setError("");
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+      if (!user) {
+        router.push("/login");
+        return;
+      }
 
-    if (!user) {
-      router.push("/login");
-      return;
-    }
+      setUserId(user.id);
 
-    setUserId(user.id);
+      const { data: profile, error: profileError } = await supabase
+        .from("profiles")
+        .select("verification_status, college_id_url")
+        .eq("id", user.id)
+        .single();
 
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("verification_status, college_id_url")
-      .eq("id", user.id)
-      .single();
+      if (profileError) {
+        setError(profileError.message);
+        setIsLoading(false);
+        return;
+      }
 
-    if (profileError) {
-      setError(profileError.message);
+      setStatus(profile?.verification_status ?? "pending");
       setIsLoading(false);
-      return;
     }
 
-    setStatus(profile?.verification_status ?? "pending");
-    setIsLoading(false);
-  }
+    loadProfile();
+  }, [router]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     setError("");
@@ -106,7 +106,7 @@ export default function VerificationPage() {
       const filePath = `${userId}/college-id.${fileExtension}`;
 
       const { error: uploadError } = await supabase.storage
-        .from("college-ids")
+        .from("student-ids")
         .upload(filePath, file, {
           upsert: true,
           contentType: file.type,
@@ -164,7 +164,7 @@ export default function VerificationPage() {
 
           <span
             className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
-              status === "verified"
+              status === "approved"
                 ? "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
                 : status === "rejected"
                 ? "bg-[#fff5f5] text-[#991b1b] border border-[#fecaca]"
@@ -194,7 +194,7 @@ export default function VerificationPage() {
           </p>
 
           {/* VERIFIED STATE */}
-          {status === "verified" && (
+          {status === "approved" && (
             <div className="mt-8 rounded-2xl border border-[#bbf7d0] bg-[#f0fdf4] p-6 text-center">
               <span className="text-4xl">🎉</span>
               <h2 className="mt-2 font-display text-2xl font-bold text-[#065f46]">
@@ -214,7 +214,7 @@ export default function VerificationPage() {
           )}
 
           {/* PENDING / REJECTED UPLOAD BOX */}
-          {status !== "verified" && (
+          {status !== "approved" && (
             <div className="mt-8 space-y-6">
               {/* Guidelines */}
               <div className="rounded-2xl bg-[#fbfaf6] border border-[#ebe5d8] p-5 text-xs text-[#4d6b5e]">

@@ -54,7 +54,7 @@ export default function VerificationGuard({
       }
 
       // If user is pending or rejected, redirect to verification page
-      if (profile.verification_status !== "verified") {
+      if (profile.verification_status !== "approved") {
         router.replace("/verification");
         return;
       }

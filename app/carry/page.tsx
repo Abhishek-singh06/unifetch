@@ -30,52 +30,60 @@ export default function CarryPackagePage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
 
-  async function loadData() {
-    setErrorMessage("");
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      router.push("/login");
-      return;
-    }
-
-    const { data: available, error: availableError } = await supabase
-      .from("package_requests")
-      .select(
-        "id, package_description, pickup_location, delivery_location, pickup_time, status, carrier_id, delivered_at, created_at"
-      )
-      .eq("status", "pending")
-      .neq("requester_id", user.id)
-      .order("pickup_time", { ascending: true });
-
-    if (availableError) {
-      console.error("Error loading available requests:", availableError);
-      setErrorMessage(availableError.message);
-    } else {
-      setAvailableRequests(available || []);
-    }
-
-    const { data: deliveries, error: deliveriesError } = await supabase
-      .from("package_requests")
-      .select(
-        "id, package_description, pickup_location, delivery_location, pickup_time, status, carrier_id, delivered_at, created_at"
-      )
-      .eq("carrier_id", user.id)
-      .order("created_at", { ascending: false });
-
-    if (deliveriesError) {
-      console.error("Error loading my deliveries:", deliveriesError);
-    } else {
-      setMyDeliveries(deliveries || []);
-    }
-
-    setLoading(false);
-  }
-
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadData() {
+      setErrorMessage("");
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        router.push("/login");
+        return;
+      }
+
+      // NOTE: pickup_otp is intentionally not selectable — it lives in a
+      // private table and is never exposed to carriers.
+      const { data: available, error: availableError } = await supabase
+        .from("package_requests")
+        .select(
+          "id, package_description, pickup_location, delivery_location, pickup_time, status, carrier_id, delivered_at, created_at"
+        )
+        .eq("status", "pending")
+        .neq("requester_id", user.id)
+        .order("pickup_time", { ascending: true });
+
+      if (cancelled) return;
+
+      if (availableError) {
+        console.error("Error loading available requests:", availableError);
+        setErrorMessage(availableError.message);
+      } else {
+        setAvailableRequests(available || []);
+      }
+
+      const { data: deliveries, error: deliveriesError } = await supabase
+        .from("package_requests")
+        .select(
+          "id, package_description, pickup_location, delivery_location, pickup_time, status, carrier_id, delivered_at, created_at"
+        )
+        .eq("carrier_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+
+      if (deliveriesError) {
+        console.error("Error loading my deliveries:", deliveriesError);
+      } else {
+        setMyDeliveries(deliveries || []);
+      }
+
+      setLoading(false);
+    }
+
     loadData();
 
     const channel = supabase
@@ -94,9 +102,10 @@ export default function CarryPackagePage() {
       .subscribe();
 
     return () => {
+      cancelled = true;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [router]);
 
   async function handleClaim(requestId: string) {
     setErrorMessage("");
@@ -112,24 +121,28 @@ export default function CarryPackagePage() {
       return;
     }
 
-    const { error } = await supabase
-      .from("package_requests")
-      .update({
-        carrier_id: user.id,
-        status: "matched",
-      })
-      .eq("id", requestId)
-      .eq("status", "pending");
+    // Atomic RPC: if another carrier claimed first, this reports FALSE instead
+    // of silently succeeding with zero rows updated.
+    const { data: claimed, error } = await supabase.rpc("claim_package_request", {
+      p_request_id: requestId,
+    });
 
     if (error) {
       setErrorMessage("Could not claim package: " + error.message);
       setClaimingId("");
-    } else {
-      setSuccessMessage("🎉 Package claimed! Head over to complete the OTP delivery.");
-      setTimeout(() => {
-        router.push(`/deliver/${requestId}`);
-      }, 1000);
+      return;
     }
+
+    if (!claimed) {
+      setErrorMessage("Someone else just claimed this package. Pick another one!");
+      setClaimingId("");
+      return;
+    }
+
+    setSuccessMessage("🎉 Package claimed! Head over to complete the OTP delivery.");
+    setTimeout(() => {
+      router.push(`/deliver/${requestId}`);
+    }, 1000);
   }
 
   const filteredRequests = availableRequests.filter((req) => {

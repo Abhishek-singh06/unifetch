@@ -80,7 +80,6 @@ const faqs = [
 export default function Home() {
   const router = useRouter();
 
-  const [userName, setUserName] = useState("");
   const [userCredits, setUserCredits] = useState(100);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isCheckingUser, setIsCheckingUser] = useState(true);
@@ -112,13 +111,12 @@ export default function Home() {
           return;
         }
 
-        if (profile.verification_status !== "verified") {
+        if (profile.verification_status !== "approved") {
           router.replace("/verification");
           return;
         }
 
         setIsLoggedIn(true);
-        setUserName(profile.full_name || "Student");
         setUserCredits(profile.credits || 100);
         setIsCheckingUser(false);
       } catch (err) {
@@ -132,7 +130,6 @@ export default function Home() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
-    setUserName("");
     setIsLoggedIn(false);
     router.refresh();
   }

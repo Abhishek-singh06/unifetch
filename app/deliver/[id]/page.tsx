@@ -96,7 +96,10 @@ export default function DeliverPackagePage() {
 
     let isOtpValid = false;
 
-    // 1. Try Supabase RPC first
+    // Single source of truth: the security-definer RPC validates the OTP
+    // against the private request_otps table AND marks the delivery + pays
+    // credits atomically. No client-side fallback — that would let carriers
+    // brute-force codes with direct queries.
     const { data: otpResult, error: otpError } = await supabase.rpc(
       "verify_package_otp",
       {
@@ -107,18 +110,6 @@ export default function DeliverPackagePage() {
 
     if (!otpError && typeof otpResult === "boolean") {
       isOtpValid = otpResult;
-    } else {
-      // 2. Direct fallback
-      const { data: checkData } = await supabase
-        .from("package_requests")
-        .select("id")
-        .eq("id", request.id)
-        .eq("pickup_otp", otp)
-        .single();
-
-      if (checkData) {
-        isOtpValid = true;
-      }
     }
 
     if (!isOtpValid) {
@@ -127,22 +118,7 @@ export default function DeliverPackagePage() {
       return;
     }
 
-    const { error } = await supabase
-      .from("package_requests")
-      .update({
-        status: "delivered",
-        otp_verified: true,
-        delivered_at: new Date().toISOString(),
-      })
-      .eq("id", request.id)
-      .eq("carrier_id", user.id);
-
-    if (error) {
-      console.error("Delivery update error:", error);
-      setErrorMessage(error.message);
-      setIsDelivering(false);
-      return;
-    }
+    // (status/credits were updated atomically inside verify_package_otp)
 
     setMessage("🎉 Delivery successfully confirmed! Credits have been credited to your account.");
 

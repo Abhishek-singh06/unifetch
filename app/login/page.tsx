@@ -56,7 +56,7 @@ export default function LoginPage() {
       return;
     }
 
-    if (profile.verification_status === "verified") {
+    if (profile.verification_status === "approved") {
       router.push("/");
       router.refresh();
       return;

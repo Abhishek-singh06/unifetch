@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
 
 const packageCategories = [
@@ -40,18 +40,27 @@ export default function RequestPackagePage() {
   const [deliveryLocation, setDeliveryLocation] = useState(hostelLocations[0]);
   const [roomNumber, setRoomNumber] = useState("");
   const [pickupTime, setPickupTime] = useState("");
-  const [rewardCredits, setRewardCredits] = useState(30);
 
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
 
-  // Default time helper (+1 hour)
+  const pickupTimeRef = useRef<HTMLInputElement>(null);
+
+  // Default time helper (+1 hour). Only called from handlers/effects, never render.
   function getDefaultTime() {
     const d = new Date(Date.now() + 60 * 60 * 1000);
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 16);
   }
+
+  useEffect(() => {
+    // Seed the datetime-local input after mount (DOM sync — no state churn,
+    // and Date.now() stays out of render so the component stays pure).
+    if (pickupTimeRef.current && !pickupTimeRef.current.value) {
+      pickupTimeRef.current.value = getDefaultTime();
+    }
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -85,21 +94,17 @@ export default function RequestPackagePage() {
 
     const fullDescription = `[${category.toUpperCase()}] ${packageDescription.trim() || packageCategories.find(c => c.id === category)?.placeholder}`;
 
-    // Generate cryptographic 6-digit OTP
-    const pickupOtp = Math.floor(100000 + Math.random() * 900000).toString();
-
-    const { error } = await supabase
-      .from("package_requests")
-      .insert({
-        requester_id: user.id,
-        package_description: fullDescription,
-        pickup_location: pickupLocation,
-        delivery_location: finalDelivery,
-        pickup_time: pickupDate.toISOString(),
-        status: "pending",
-        pickup_otp: pickupOtp,
-        otp_verified: false,
-      });
+    // OTP is generated server-side inside the RPC so it never round-trips
+    // through the browser and is stored in a private table.
+    const { error } = await supabase.rpc(
+      "create_package_request",
+      {
+        p_package_description: fullDescription,
+        p_pickup_location: pickupLocation,
+        p_delivery_location: finalDelivery,
+        p_pickup_time: pickupDate.toISOString(),
+      }
+    );
 
     if (error) {
       console.error("Package request error:", error);
@@ -267,8 +272,8 @@ export default function RequestPackagePage() {
                 <input
                   id="pickupTime"
                   name="pickupTime"
+                  ref={pickupTimeRef}
                   type="datetime-local"
-                  defaultValue={getDefaultTime()}
                   onChange={(e) => setPickupTime(e.target.value)}
                   className="w-full rounded-2xl border border-[#d8d2c4] bg-[#fbfaf6] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-[#0f4c3a] focus:bg-white focus:ring-4 focus:ring-[#10b981]/15"
                 />

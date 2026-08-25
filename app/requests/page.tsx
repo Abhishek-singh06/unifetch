@@ -12,7 +12,6 @@ type PackageRequest = {
   pickup_time: string;
   status: string;
   carrier_id: string | null;
-  pickup_otp: string | null;
   otp_verified: boolean;
   delivered_at: string | null;
   created_at: string;
@@ -20,44 +19,68 @@ type PackageRequest = {
 
 export default function RequestsPage() {
   const [requests, setRequests] = useState<PackageRequest[]>([]);
+  const [otps, setOtps] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
   const [cancelingId, setCancelingId] = useState<string | null>(null);
   const [copiedOtpId, setCopiedOtpId] = useState<string | null>(null);
 
-  async function loadRequests() {
-    setErrorMessage("");
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      setErrorMessage("Please sign in to view your requests.");
-      setIsLoading(false);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("package_requests")
-      .select(
-        "id, package_description, pickup_location, delivery_location, pickup_time, status, carrier_id, pickup_otp, otp_verified, delivered_at, created_at"
-      )
-      .eq("requester_id", user.id)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("Error loading requests:", error);
-      setErrorMessage(error.message);
-      setIsLoading(false);
-      return;
-    }
-
-    setRequests(data || []);
-    setIsLoading(false);
-  }
-
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadRequests() {
+      setErrorMessage("");
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        if (!cancelled) {
+          setErrorMessage("Please sign in to view your requests.");
+          setIsLoading(false);
+        }
+        return;
+      }
+
+      // NOTE: the OTP is intentionally NOT stored on package_requests (that
+      // table is browsable by all users). It's fetched per-request through a
+      // requester-only security-definer RPC.
+      const { data, error } = await supabase
+        .from("package_requests")
+        .select(
+          "id, package_description, pickup_location, delivery_location, pickup_time, status, carrier_id, otp_verified, delivered_at, created_at"
+        )
+        .eq("requester_id", user.id)
+        .order("created_at", { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Error loading requests:", error);
+        setErrorMessage(error.message);
+        setIsLoading(false);
+        return;
+      }
+
+      setRequests(data || []);
+      setIsLoading(false);
+
+      if (data) {
+        const otpResults = await Promise.all(
+          data.map(async (request) => {
+            const { data: otp } = await supabase.rpc("get_my_request_otp", {
+              p_request_id: request.id,
+            });
+            return [request.id, otp ?? ""] as const;
+          })
+        );
+        if (!cancelled) {
+          setOtps(Object.fromEntries(otpResults));
+        }
+      }
+    }
+
     loadRequests();
 
     const channel = supabase
@@ -76,6 +99,7 @@ export default function RequestsPage() {
       .subscribe();
 
     return () => {
+      cancelled = true;
       supabase.removeChannel(channel);
     };
   }, []);
@@ -303,14 +327,14 @@ export default function RequestsPage() {
                         </p>
                       </div>
 
-                      {request.pickup_otp && (
+                      {otps[request.id] && (
                         <div className="flex items-center gap-2 self-start sm:self-center">
                           <span className="rounded-xl border-2 border-dashed border-[#1e40af]/40 bg-white px-4 py-2 font-mono text-2xl font-black tracking-[0.25em] text-[#1e40af] shadow-xs">
-                            {request.pickup_otp}
+                            {otps[request.id]}
                           </span>
                           <button
                             type="button"
-                            onClick={() => handleCopyOtp(request.id, request.pickup_otp!)}
+                            onClick={() => handleCopyOtp(request.id, otps[request.id])}
                             className="rounded-xl bg-white border border-[#bfdbfe] px-3 py-2.5 text-xs font-bold text-[#1e40af] hover:bg-[#e0efff] transition"
                           >
                             {copiedOtpId === request.id ? "✓ Copied" : "Copy"}
@@ -341,9 +365,9 @@ export default function RequestsPage() {
                   <div className="mt-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between rounded-2xl border border-[#fef3c7] bg-[#fffdf7] p-4 text-xs text-[#92400e]">
                     <div>
                       <span className="font-bold">⏳ Waiting for a peer near the gate</span>
-                      {request.pickup_otp && (
+                      {otps[request.id] && (
                         <span className="block mt-1 text-[11px] text-[#a16207]">
-                          Your confidential OTP: <strong className="font-mono tracking-widest">{request.pickup_otp}</strong>
+                          Your confidential OTP: <strong className="font-mono tracking-widest">{otps[request.id]}</strong>
                         </span>
                       )}
                     </div>
