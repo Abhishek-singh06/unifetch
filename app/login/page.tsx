@@ -3,7 +3,18 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
+import { Eye, EyeOff, ShieldCheck, Quote, ArrowRight, Mail, Lock } from "lucide-react";
 import { supabase } from "@/lib/supabase/client";
+import { Logo } from "../components/ui/Logo";
+import { Button } from "../components/ui/Button";
+import { Field } from "../components/ui/Field";
+import { Alert } from "../components/ui/Alert";
+
+const benefits = [
+  "100% student-only community",
+  "6-digit tamper-proof delivery handshake",
+  "Zero delivery charges between peers",
+];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,10 +35,7 @@ export default function LoginPage() {
     const password = formData.get("password") as string;
 
     const { data: loginData, error: loginError } =
-      await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      await supabase.auth.signInWithPassword({ email, password });
 
     if (loginError) {
       setErrorMessage(loginError.message);
@@ -41,12 +49,10 @@ export default function LoginPage() {
       return;
     }
 
-    const userId = loginData.user.id;
-
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
       .select("verification_status, college_id_url")
-      .eq("id", userId)
+      .eq("id", loginData.user.id)
       .single();
 
     if (profileError) {
@@ -62,7 +68,10 @@ export default function LoginPage() {
       return;
     }
 
-    if (profile.verification_status === "pending" || profile.verification_status === "rejected") {
+    if (
+      profile.verification_status === "pending" ||
+      profile.verification_status === "rejected"
+    ) {
       router.push("/verification");
       router.refresh();
       return;
@@ -73,140 +82,117 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f8f7f2] flex items-center justify-center p-4 sm:p-6 lg:p-8 selection:bg-[#10b981]/20">
-      <div className="mx-auto grid min-h-[580px] w-full max-w-5xl overflow-hidden rounded-3xl border border-[#e2dcd0] bg-white shadow-2xl shadow-[#0c241b]/10 lg:grid-cols-[1fr_1.1fr]">
-        {/* Left Side: Campus Brand Visual */}
-        <aside className="hidden flex-col justify-between bg-[#0c241b] p-10 text-white lg:flex relative overflow-hidden">
-          <div className="absolute -right-20 -bottom-20 w-80 h-80 rounded-full bg-[#10b981]/15 blur-3xl pointer-events-none" />
+    <main className="flex min-h-screen items-center justify-center bg-background p-4 selection:bg-accent/20 sm:p-6 lg:p-8">
+      <div className="grid min-h-[580px] w-full max-w-5xl overflow-hidden rounded-[2rem] border border-border bg-surface shadow-[var(--shadow-lift)] lg:grid-cols-[1fr_1.1fr]">
+        {/* Left: brand panel */}
+        <aside className="relative hidden flex-col justify-between overflow-hidden bg-primary p-10 text-white lg:flex">
+          <div className="absolute -right-24 -bottom-24 h-80 w-80 rounded-full bg-accent/20 blur-3xl" />
+          <div className="absolute right-10 top-10 h-40 w-40 rounded-full bg-white/5 blur-2xl" />
 
-          <Link href="/" className="flex items-center gap-2.5 self-start group">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#10b981] text-[#0c241b] font-bold shadow-md">
-              U
-            </div>
-            <span className="font-display text-xl font-bold tracking-tight">
-              UniFetch
-            </span>
+          <Link href="/" className="relative z-10">
+            <Logo showTagline className="[&_span]:text-white" />
           </Link>
 
           <div className="relative z-10">
-            <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wider text-[#10b981] border border-white/15">
+            <span className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold uppercase tracking-wider text-accent">
+              <ShieldCheck className="h-3.5 w-3.5" />
               Welcome back
             </span>
 
-            <h1 className="mt-4 font-display text-3xl font-extrabold leading-tight tracking-tight">
+            <h1 className="mt-5 font-display text-3xl font-extrabold leading-tight tracking-tight">
               Your campus community is moving packages.
             </h1>
 
             <p className="mt-3 text-sm leading-relaxed text-[#bad4c8]">
-              Sign in to track your gate deliveries or pocket credits carrying parcels for dorm neighbours.
+              Sign in to track your gate deliveries or pocket credits carrying
+              parcels for dorm neighbours.
             </p>
 
-            {/* Testimonial Card */}
-            <div className="mt-8 rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-xs">
-              <p className="text-xs italic text-[#e6f4ed]">
-                &ldquo;UniFetch saved me 25 minutes of walking in the rain yesterday. The OTP handoff is super smooth.&rdquo;
+            <div className="mt-8 rounded-2xl border border-white/10 bg-white/[0.06] p-5 backdrop-blur-sm">
+              <Quote className="h-5 w-5 text-accent" />
+              <p className="mt-3 text-xs italic leading-relaxed text-[#e6f4ed]">
+                UniFetch saved me 25 minutes of walking in the rain yesterday.
+                The OTP handoff is super smooth.
               </p>
-              <p className="mt-2 text-[11px] font-bold text-[#10b981]">
+              <p className="mt-3 text-[11px] font-bold text-accent">
                 — Tanvi M., CS 3rd Year
               </p>
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-xs text-[#7eaba0]">
-            <span>🔒 Verified ID Protected</span>
-            <span>⚡ 100% Student Powered</span>
+          <div className="relative z-10 flex items-center gap-2 text-xs font-medium text-[#7eaba0]">
+            <ShieldCheck className="h-4 w-4" />
+            Verified ID protected · 100% student powered
           </div>
         </aside>
 
-        {/* Right Side: Form */}
+        {/* Right: form */}
         <section className="flex flex-col justify-center p-6 sm:p-10 lg:p-12">
-          <div className="w-full max-w-md mx-auto">
-            <Link href="/" className="flex items-center gap-2 text-lg font-bold text-[#0c241b] lg:hidden mb-6">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#0f4c3a] text-white text-xs font-bold">
-                U
-              </div>
-              <span>UniFetch</span>
+          <div className="mx-auto w-full max-w-md">
+            <Link href="/" className="mb-6 flex items-center gap-2 text-lg font-bold text-[#0c241b] lg:hidden">
+              <Logo />
             </Link>
 
-            <span className="text-xs font-bold uppercase tracking-widest text-[#0f4c3a]">
-              Account Access
-            </span>
-
-            <h2 className="mt-1 font-display text-3xl font-extrabold tracking-tight text-[#081e15]">
+            <span className="eyebrow">Account access</span>
+            <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-[#081e15]">
               Sign in to your account
             </h2>
-
-            <p className="mt-2 text-xs text-[#5c7a6e]">
+            <p className="mt-2 text-sm text-muted">
               Enter your student email and password to continue.
             </p>
 
             <form className="mt-8 space-y-4" onSubmit={handleSubmit} noValidate>
-              <div>
-                <label
-                  htmlFor="email"
-                  className="block text-xs font-bold uppercase tracking-wider text-[#496a5d] mb-1.5"
-                >
-                  Student Email Address
-                </label>
-                <input
-                  id="email"
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  required
-                  placeholder="you@college.edu"
-                  className="w-full rounded-2xl border border-[#d8d2c4] bg-[#fbfaf6] px-4 py-3.5 text-sm font-medium outline-none transition placeholder:text-[#9bb2a5] focus:border-[#0f4c3a] focus:bg-white focus:ring-4 focus:ring-[#10b981]/15"
-                />
-              </div>
+              <Field
+                id="email"
+                name="email"
+                type="email"
+                required
+                label="Student email address"
+                placeholder="you@college.edu"
+                autoComplete="email"
+              />
 
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label
-                    htmlFor="password"
-                    className="block text-xs font-bold uppercase tracking-wider text-[#496a5d]"
-                  >
+                <div className="mb-1.5 flex items-center justify-between">
+                  <label htmlFor="password" className="field-label">
                     Password
                   </label>
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="text-xs font-bold text-[#0f4c3a] hover:underline"
+                    className="flex items-center gap-1 text-xs font-bold text-primary hover:underline"
                   >
+                    {showPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
                     {showPassword ? "Hide" : "Show"}
                   </button>
                 </div>
-
-                <input
-                  id="password"
-                  name="password"
-                  type={showPassword ? "text" : "password"}
-                  autoComplete="current-password"
-                  required
-                  placeholder="Enter your password"
-                  className="w-full rounded-2xl border border-[#d8d2c4] bg-[#fbfaf6] px-4 py-3.5 text-sm font-medium outline-none transition placeholder:text-[#9bb2a5] focus:border-[#0f4c3a] focus:bg-white focus:ring-4 focus:ring-[#10b981]/15"
-                />
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[#9bb2a5]" />
+                  <input
+                    id="password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    required
+                    placeholder="Enter your password"
+                    autoComplete="current-password"
+                    className="field pl-10"
+                  />
+                </div>
               </div>
 
-              {errorMessage && (
-                <div className="rounded-2xl border border-[#fecaca] bg-[#fff5f5] p-4 text-xs font-semibold text-[#991b1b]">
-                  {errorMessage}
-                </div>
-              )}
+              {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
 
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full rounded-2xl bg-[#0f4c3a] py-3.5 text-sm font-bold text-white shadow-xl shadow-[#0f4c3a]/20 transition hover:bg-[#093326] hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60"
-              >
-                {isLoading ? "Signing in..." : "Sign in →"}
-              </button>
+              <Button type="submit" size="lg" disabled={isLoading} className="w-full">
+                {isLoading ? "Signing in…" : "Sign in"}
+                {!isLoading && <ArrowRight className="h-4 w-4" />}
+              </Button>
             </form>
 
             <p className="mt-8 text-center text-xs text-[#638074]">
               Don&apos;t have an account yet?{" "}
               <Link
                 href="/signup"
-                className="font-bold text-[#0f4c3a] underline underline-offset-4 hover:text-[#093326]"
+                className="font-bold text-primary underline underline-offset-4 hover:text-primary-hover"
               >
                 Create your student account (100 free credits)
               </Link>

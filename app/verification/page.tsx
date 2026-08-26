@@ -4,6 +4,14 @@ import { ChangeEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { Field } from "../components/ui/Field";
+import { Alert } from "../components/ui/Alert";
+import { Badge } from "../components/ui/Badge";
+import { EmptyState } from "../components/ui/EmptyState";
+import { PageHeader } from "../components/ui/PageHeader";
+import { Spinner, PageLoader } from "../components/ui/Spinner";
 
 export default function VerificationPage() {
   const router = useRouter();
@@ -145,71 +153,57 @@ export default function VerificationPage() {
 
   if (isLoading) {
     return (
-      <main className="min-h-screen bg-[#f8f7f2] flex items-center justify-center">
-        <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-3 border-[#d8e8de] border-t-[#0f4c3a]" />
-          <p className="mt-3 text-xs font-semibold text-[#577568]">Checking verification status...</p>
-        </div>
-      </main>
+      <PageLoader label="Checking verification status..." />
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#f8f7f2] px-5 py-8 text-[#0c1c15] sm:px-8 sm:py-12 selection:bg-[#10b981]/20">
+    <main className="min-h-screen bg-background px-5 py-8 text-foreground sm:px-8 sm:py-12 selection:bg-accent/20">
       <div className="mx-auto max-w-3xl">
-        <div className="flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 text-sm font-bold text-[#0f4c3a]">
-            <span>← Back to UniFetch</span>
-          </Link>
+        <PageHeader
+          backHref="/"
+          backLabel="Back to UniFetch"
+          actions={
+            <Badge
+              tone={
+                status === "approved" ? "success" :
+                status === "rejected" ? "danger" : "warning"
+              }
+            >
+              STATUS: {status.toUpperCase()}
+            </Badge>
+          }
+        />
 
-          <span
-            className={`rounded-full px-3.5 py-1.5 text-xs font-bold ${
-              status === "approved"
-                ? "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
-                : status === "rejected"
-                ? "bg-[#fff5f5] text-[#991b1b] border border-[#fecaca]"
-                : "bg-[#fffbeb] text-[#92400e] border border-[#fde68a]"
-            }`}
-          >
-            STATUS: {status.toUpperCase()}
-          </span>
-        </div>
-
-        <div className="mt-8 rounded-3xl border border-[#e2dcd0] bg-white p-6 shadow-xl shadow-[#0c241b]/5 sm:p-10">
+        <Card className="mt-8 p-6 sm:p-10">
           <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#ecfdf5] text-lg">
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary-tint text-lg">
               🪪
             </span>
-            <span className="text-xs font-bold uppercase tracking-widest text-[#0f4c3a]">
-              Community Trust & Safety
-            </span>
+            <span className="eyebrow">Community Trust & Safety</span>
           </div>
 
-          <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-[#081e15]">
+          <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-primary-hover">
             Student ID Verification
           </h1>
 
-          <p className="mt-2 text-sm text-[#5c7a6e]">
+          <p className="mt-2 text-sm text-muted">
             UniFetch is an exclusive student-only network. Upload a photo of your physical student ID card to unlock campus package requests and deliveries.
           </p>
 
           {/* VERIFIED STATE */}
           {status === "approved" && (
-            <div className="mt-8 rounded-2xl border border-[#bbf7d0] bg-[#f0fdf4] p-6 text-center">
+            <div className="mt-8 rounded-2xl border border-accent/30 bg-accent-tint p-6 text-center">
               <span className="text-4xl">🎉</span>
-              <h2 className="mt-2 font-display text-2xl font-bold text-[#065f46]">
+              <h2 className="mt-2 font-display text-2xl font-bold text-success">
                 You are Verified!
               </h2>
-              <p className="mt-2 text-xs text-[#2c7a5c]">
+              <p className="mt-2 text-xs text-muted">
                 Your college ID has been reviewed and approved. You have full access to request and carry packages across campus.
               </p>
-              <button
-                type="button"
-                onClick={() => router.push("/")}
-                className="mt-6 rounded-2xl bg-[#0f4c3a] px-7 py-3.5 text-xs font-bold text-white shadow-md shadow-[#0f4c3a]/20 hover:bg-[#093326] transition"
-              >
+              <Button type="button" onClick={() => router.push("/")} size="lg" className="mt-6">
                 Go to UniFetch Campus Dashboard →
-              </button>
+              </Button>
             </div>
           )}
 
@@ -217,9 +211,9 @@ export default function VerificationPage() {
           {status !== "approved" && (
             <div className="mt-8 space-y-6">
               {/* Guidelines */}
-              <div className="rounded-2xl bg-[#fbfaf6] border border-[#ebe5d8] p-5 text-xs text-[#4d6b5e]">
-                <p className="font-bold text-[#0c241b] mb-2">Photo Guidelines for Fast Approval:</p>
-                <ul className="space-y-1.5 text-[#5e7c6f]">
+              <div className="rounded-2xl border border-border bg-surface-soft p-5 text-xs text-muted">
+                <p className="font-bold text-primary-hover mb-2">Photo Guidelines for Fast Approval:</p>
+                <ul className="space-y-1.5 text-muted">
                   <li>• Photo must be well-lit with all text easily readable.</li>
                   <li>• Student name and current academic validity year must be clearly visible.</li>
                   <li>• Accepts JPG, PNG, or WebP (Max 5 MB).</li>
@@ -230,7 +224,7 @@ export default function VerificationPage() {
               <div>
                 <label
                   htmlFor="collegeId"
-                  className="block text-xs font-bold uppercase tracking-wider text-[#496a5d] mb-2"
+                  className="field-label"
                 >
                   Upload College ID Photo
                 </label>
@@ -240,50 +234,42 @@ export default function VerificationPage() {
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   onChange={handleFileChange}
-                  className="block w-full cursor-pointer rounded-2xl border-2 border-dashed border-[#cbdad2] bg-[#fdfdfb] p-6 text-xs text-[#527163] file:mr-4 file:rounded-xl file:border-0 file:bg-[#0f4c3a] file:px-4 file:py-2.5 file:text-xs file:font-bold file:text-white hover:border-[#0f4c3a] transition"
+                  className="block w-full cursor-pointer rounded-2xl border-2 border-dashed border-border bg-surface-soft p-6 text-xs text-muted file:mr-4 file:rounded-xl file:border-0 file:bg-[var(--color-primary)] file:px-4 file:py-2.5 file:text-xs file:font-bold file:text-white hover:border-primary transition"
                 />
               </div>
 
               {/* Preview Thumbnail */}
               {previewUrl && (
-                <div className="rounded-2xl border border-[#d6ecdf] bg-[#f4fbf7] p-4 flex items-center gap-4">
+                <div className="rounded-2xl border border-accent/30 bg-primary-tint p-4 flex items-center gap-4">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={previewUrl}
                     alt="ID Preview"
-                    className="h-20 w-28 object-cover rounded-xl border border-[#bbf7d0]"
+                    className="h-20 w-28 object-cover rounded-xl border border-accent/30"
                   />
                   <div>
-                    <p className="text-xs font-bold text-[#0f4c3a]">Selected File Ready to Upload</p>
-                    <p className="text-[11px] text-[#557868] mt-0.5">{file?.name}</p>
+                    <p className="text-xs font-bold text-primary-hover">Selected File Ready to Upload</p>
+                    <p className="text-[11px] text-muted mt-0.5">{file?.name}</p>
                   </div>
                 </div>
               )}
 
-              {error && (
-                <div className="rounded-2xl border border-[#fecaca] bg-[#fff5f5] p-4 text-xs font-semibold text-[#991b1b]">
-                  {error}
-                </div>
-              )}
+              <Alert tone="error" className="">{error}</Alert>
+              <Alert tone="success" className="">{message}</Alert>
 
-              {message && (
-                <div className="rounded-2xl border border-[#bbf7d0] bg-[#f0fdf4] p-4 text-xs font-semibold text-[#065f46]">
-                  {message}
-                </div>
-              )}
-
-              <button
+              <Button
                 type="button"
                 onClick={handleUpload}
                 disabled={isUploading || !file}
-                className="w-full rounded-2xl bg-[#0f4c3a] py-4 text-sm font-bold text-white shadow-xl shadow-[#0f4c3a]/20 transition hover:bg-[#093326] hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+                size="lg"
+                className="w-full"
               >
                 {isUploading ? "Uploading College ID..." : "Submit ID for Verification 🚀"}
-              </button>
+              </Button>
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </main>
   );
-}
+}

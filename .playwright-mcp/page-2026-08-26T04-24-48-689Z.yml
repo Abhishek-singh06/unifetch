@@ -1,0 +1,4 @@
+- generic [active] [ref=e1]:
+  - main [ref=e2]:
+    - paragraph [ref=e5]: Checking your verification status...
+  - button "Open Next.js Dev Tools" [ref=e11] [cursor=pointer]

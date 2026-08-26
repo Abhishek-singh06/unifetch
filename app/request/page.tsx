@@ -4,6 +4,15 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase/client";
+import { Logo } from "../components/ui/Logo";
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { Field, Select } from "../components/ui/Field";
+import { Alert } from "../components/ui/Alert";
+import { Badge } from "../components/ui/Badge";
+import { EmptyState } from "../components/ui/EmptyState";
+import { PageHeader } from "../components/ui/PageHeader";
+import { StatPill } from "../components/ui/StatPill";
 
 const packageCategories = [
   { id: "amazon", label: "Amazon / Flipkart", icon: "📦", placeholder: "e.g. Noise Smartwatch box" },
@@ -123,49 +132,41 @@ export default function RequestPackagePage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#f8f7f2] px-5 py-8 text-[#0c1c15] sm:px-8 sm:py-12 selection:bg-[#10b981]/20">
+    <main className="min-h-screen bg-background px-5 py-8 text-foreground sm:px-8 sm:py-12 selection:bg-accent/20">
       <div className="mx-auto max-w-4xl">
         {/* Header navigation */}
-        <div className="flex items-center justify-between">
-          <Link
-            href="/"
-            className="flex items-center gap-1.5 text-xs font-bold text-[#0f4c3a] hover:text-[#093326]"
-          >
-            <span>← Back to UniFetch</span>
-          </Link>
-
-          <Link
-            href="/requests"
-            className="rounded-full border border-[#d6e3db] bg-white px-4 py-2 text-xs font-bold text-[#0f4c3a] shadow-xs transition hover:bg-[#edeae0]"
-          >
-            View Active Requests
-          </Link>
-        </div>
+        <PageHeader
+          backHref="/"
+          backLabel="Back to UniFetch"
+          actions={
+            <Link href="/requests" className="btn-ghost px-3 py-1.5 text-xs">
+              View Active Requests
+            </Link>
+          }
+        />
 
         <div className="mt-8 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
           {/* Left Form Card */}
-          <div className="rounded-3xl border border-[#e2dcd0] bg-white p-6 shadow-xl shadow-[#0c241b]/5 sm:p-9">
+          <Card className="p-6 sm:p-9">
             <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#ecfdf5] text-sm">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-tint text-sm">
                 📦
               </span>
-              <span className="text-xs font-bold uppercase tracking-widest text-[#0f4c3a]">
-                New Delivery Request
-              </span>
+              <span className="eyebrow">New Delivery Request</span>
             </div>
 
-            <h1 className="mt-3 font-display text-3xl font-extrabold tracking-tight text-[#081e15]">
+            <h1 className="mt-3 font-display text-3xl font-extrabold tracking-tight text-primary-hover">
               Get your parcel from the gate
             </h1>
 
-            <p className="mt-2 text-sm text-[#5c7a6e]">
+            <p className="mt-2 text-sm text-muted">
               A verified student walking near the gate will bring it to your hostel lobby.
             </p>
 
             <form onSubmit={handleSubmit} className="mt-8 space-y-6">
               {/* Category Picker */}
               <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-[#4d6b5e] mb-2.5">
+                <label className="field-label">
                   1. What kind of package is it?
                 </label>
                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
@@ -176,8 +177,8 @@ export default function RequestPackagePage() {
                       onClick={() => setCategory(cat.id)}
                       className={`flex items-center gap-2 rounded-2xl p-3 text-left text-xs font-bold transition border ${
                         category === cat.id
-                          ? "border-[#0f4c3a] bg-[#ecfdf5] text-[#0f4c3a] shadow-xs ring-2 ring-[#10b981]/20"
-                          : "border-[#e5e0d3] bg-[#fdfdfb] text-[#557365] hover:border-[#cbd7cf]"
+                          ? "border-primary bg-primary-tint text-primary shadow-xs ring-2 ring-accent/20"
+                          : "border-border bg-surface-soft text-muted hover:border-border-strong"
                       }`}
                     >
                       <span className="text-base">{cat.icon}</span>
@@ -188,170 +189,132 @@ export default function RequestPackagePage() {
               </div>
 
               {/* Package Description */}
-              <div>
-                <label
-                  htmlFor="packageDescription"
-                  className="block text-xs font-bold uppercase tracking-wider text-[#4d6b5e] mb-2"
-                >
-                  2. Brief Item Description
-                </label>
-                <input
-                  id="packageDescription"
-                  name="packageDescription"
-                  type="text"
-                  required
-                  value={packageDescription}
-                  onChange={(e) => setPackageDescription(e.target.value)}
-                  placeholder={packageCategories.find((c) => c.id === category)?.placeholder}
-                  className="w-full rounded-2xl border border-[#d8d2c4] bg-[#fbfaf6] px-4 py-3.5 text-sm font-medium outline-none transition placeholder:text-[#9bb2a5] focus:border-[#0f4c3a] focus:bg-white focus:ring-4 focus:ring-[#10b981]/15"
-                />
-              </div>
+              <Field
+                id="packageDescription"
+                name="packageDescription"
+                type="text"
+                required
+                label="2. Brief Item Description"
+                placeholder={packageCategories.find((c) => c.id === category)?.placeholder}
+                value={packageDescription}
+                onChange={(e) => setPackageDescription(e.target.value)}
+              />
 
               {/* Gate Pickup Location */}
-              <div>
-                <label
-                  htmlFor="pickupLocation"
-                  className="block text-xs font-bold uppercase tracking-wider text-[#4d6b5e] mb-2"
-                >
-                  3. Pickup Gate / Counter
-                </label>
-                <select
-                  id="pickupLocation"
-                  value={pickupLocation}
-                  onChange={(e) => setPickupLocation(e.target.value)}
-                  className="w-full rounded-2xl border border-[#d8d2c4] bg-[#fbfaf6] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-[#0f4c3a] focus:bg-white focus:ring-4 focus:ring-[#10b981]/15"
-                >
-                  {gateLocations.map((loc) => (
-                    <option key={loc} value={loc}>
-                      {loc}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <Select
+                id="pickupLocation"
+                label="3. Pickup Gate / Counter"
+                value={pickupLocation}
+                onChange={(e) => setPickupLocation(e.target.value)}
+              >
+                {gateLocations.map((loc) => (
+                  <option key={loc} value={loc}>
+                    {loc}
+                  </option>
+                ))}
+              </Select>
 
               {/* Delivery Dropoff Location */}
               <div>
                 <label
                   htmlFor="deliveryLocation"
-                  className="block text-xs font-bold uppercase tracking-wider text-[#4d6b5e] mb-2"
+                  className="field-label"
                 >
                   4. Your Hostel / Building
                 </label>
                 <div className="grid gap-3 sm:grid-cols-[1.3fr_0.7fr]">
-                  <select
+                  <Select
                     id="deliveryLocation"
                     value={deliveryLocation}
                     onChange={(e) => setDeliveryLocation(e.target.value)}
-                    className="w-full rounded-2xl border border-[#d8d2c4] bg-[#fbfaf6] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-[#0f4c3a] focus:bg-white focus:ring-4 focus:ring-[#10b981]/15"
                   >
                     {hostelLocations.map((loc) => (
                       <option key={loc} value={loc}>
                         {loc}
                       </option>
                     ))}
-                  </select>
+                  </Select>
 
-                  <input
+                  <Field
+                    id="roomNumber"
                     type="text"
                     placeholder="Room No. (e.g. 302)"
                     value={roomNumber}
                     onChange={(e) => setRoomNumber(e.target.value)}
-                    className="w-full rounded-2xl border border-[#d8d2c4] bg-[#fbfaf6] px-4 py-3.5 text-sm font-medium outline-none transition placeholder:text-[#9bb2a5] focus:border-[#0f4c3a] focus:bg-white focus:ring-4 focus:ring-[#10b981]/15"
                   />
                 </div>
               </div>
 
               {/* Pickup Time */}
-              <div>
-                <label
-                  htmlFor="pickupTime"
-                  className="block text-xs font-bold uppercase tracking-wider text-[#4d6b5e] mb-2"
-                >
-                  5. Needed By (Time)
-                </label>
-                <input
-                  id="pickupTime"
-                  name="pickupTime"
-                  ref={pickupTimeRef}
-                  type="datetime-local"
-                  onChange={(e) => setPickupTime(e.target.value)}
-                  className="w-full rounded-2xl border border-[#d8d2c4] bg-[#fbfaf6] px-4 py-3.5 text-sm font-medium outline-none transition focus:border-[#0f4c3a] focus:bg-white focus:ring-4 focus:ring-[#10b981]/15"
-                />
-              </div>
+              <Field
+                id="pickupTime"
+                name="pickupTime"
+                ref={pickupTimeRef}
+                type="datetime-local"
+                label="5. Needed By (Time)"
+                onChange={(e) => setPickupTime(e.target.value)}
+              />
 
               {/* Error and Success notifications */}
-              {errorMessage && (
-                <div className="rounded-2xl border border-[#fecaca] bg-[#fff5f5] p-4 text-xs font-semibold text-[#991b1b]">
-                  {errorMessage}
-                </div>
-              )}
-
-              {message && (
-                <div className="rounded-2xl border border-[#bbf7d0] bg-[#f0fdf4] p-4 text-xs font-semibold text-[#065f46]">
-                  {message}
-                </div>
-              )}
+              <Alert tone="error" className="">{errorMessage}</Alert>
+              <Alert tone="success" className="">{message}</Alert>
 
               {/* Submit Button */}
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full rounded-2xl bg-[#0f4c3a] py-4 text-sm font-bold text-white shadow-xl shadow-[#0f4c3a]/20 transition hover:bg-[#093326] hover:scale-[1.01] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isLoading ? "Publishing Request..." : "Post Delivery Request 🚀"}
-              </button>
+              <Button type="submit" size="lg" disabled={isLoading} className="w-full">
+                {isLoading ? "Publishing Request…" : "Post Delivery Request 🚀"}
+              </Button>
             </form>
-          </div>
+          </Card>
 
           {/* Right Security & Preview Sidebar */}
           <div className="space-y-6">
             {/* Live Guarantee Box */}
-            <div className="rounded-3xl border border-[#d6ecdf] bg-[#f4fbf7] p-6 shadow-sm">
+            <Card className="p-6 panel-mint">
               <div className="flex items-center gap-2">
                 <span className="text-xl">🛡️</span>
-                <h3 className="font-display font-bold text-[#0f4c3a]">
+                <h3 className="font-display font-bold text-primary-hover">
                   OTP Handshake Guarantee
                 </h3>
               </div>
-              <p className="mt-3 text-xs leading-relaxed text-[#446b5a]">
+              <p className="mt-3 text-xs leading-relaxed text-muted">
                 When your order is created, UniFetch generates a private 6-digit confirmation code.
               </p>
-              <div className="mt-4 rounded-2xl border border-[#bbf7d0] bg-white p-4 text-center">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-[#698c7d]">
+              <div className="mt-4 rounded-2xl border border-accent/30 bg-surface p-4 text-center">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-muted">
                   Sample Confirmation Code
                 </p>
-                <p className="mt-1 font-mono text-2xl font-black tracking-[0.3em] text-[#0f4c3a]">
+                <p className="mt-1 font-mono text-2xl font-black tracking-[0.3em] text-primary-hover">
                   8 4 9 1 2 0
                 </p>
-                <p className="mt-1 text-[11px] text-[#557868]">
+                <p className="mt-1 text-[11px] text-muted">
                   Only share this after receiving your parcel.
                 </p>
               </div>
-            </div>
+            </Card>
 
             {/* Quick Tips */}
-            <div className="rounded-3xl border border-[#e2dcd0] bg-white p-6 shadow-sm">
-              <h4 className="font-display font-bold text-[#0c241b]">
+            <Card className="p-6">
+              <h4 className="font-display font-bold text-primary-hover">
                 Campus Delivery Tips
               </h4>
-              <ul className="mt-4 space-y-3 text-xs text-[#527163]">
+              <ul className="mt-4 space-y-3 text-xs text-muted">
                 <li className="flex items-start gap-2">
-                  <span className="text-[#10b981] font-bold">✓</span>
+                  <span className="text-accent font-bold">✓</span>
                   <span>Tell your courier driver to drop your parcel at the security desk if they arrive early.</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-[#10b981] font-bold">✓</span>
+                  <span className="text-accent font-bold">✓</span>
                   <span>Carriers are rewarded with credits right after OTP confirmation.</span>
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="text-[#10b981] font-bold">✓</span>
+                  <span className="text-accent font-bold">✓</span>
                   <span>You can cancel anytime while your request is still waiting for a carrier.</span>
                 </li>
               </ul>
-            </div>
+            </Card>
           </div>
         </div>
       </div>
     </main>
   );
-}
+}

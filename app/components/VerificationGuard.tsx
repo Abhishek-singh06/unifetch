@@ -3,6 +3,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase/client";
+import { Spinner, PageLoader } from "../components/ui/Spinner";
 
 export default function VerificationGuard({
   children,
@@ -68,15 +69,7 @@ export default function VerificationGuard({
 
   if (checking) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-[#fbfcf8]">
-        <div className="text-center">
-          <div className="mx-auto h-10 w-10 animate-spin rounded-full border-4 border-[#dce8e1] border-t-[#1f6a55]" />
-
-          <p className="mt-4 text-sm font-medium text-[#617971]">
-            Checking your verification status...
-          </p>
-        </div>
-      </main>
+      <PageLoader label="Checking your verification status..." />
     );
   }
 

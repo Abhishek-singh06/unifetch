@@ -4,6 +4,16 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase/client";
+import { Logo } from "../components/ui/Logo";
+import { Button } from "../components/ui/Button";
+import { Card } from "../components/ui/Card";
+import { Badge } from "../components/ui/Badge";
+import { Alert } from "../components/ui/Alert";
+import { EmptyState } from "../components/ui/EmptyState";
+import { StatPill } from "../components/ui/StatPill";
+import { PageHeader } from "../components/ui/PageHeader";
+import { StatusBadge } from "../components/ui/StatusBadge";
+import { Field } from "../components/ui/Field";
 
 type PackageRequest = {
   id: string;
@@ -163,97 +173,66 @@ export default function CarryPackagePage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-[#f8f7f2] flex items-center justify-center">
+      <main className="flex min-h-screen items-center justify-center bg-background">
         <div className="text-center">
-          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-3 border-[#d8e8de] border-t-[#0f4c3a]" />
-          <p className="mt-3 text-xs font-semibold text-[#577568]">Loading gate pickups...</p>
+          <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-white shadow-[var(--shadow-primary)]">
+            <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+              <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+            </svg>
+          </span>
+          <p className="mt-4 text-xs font-semibold tracking-wide text-muted">Loading gate pickups...</p>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-[#f8f7f2] px-5 py-8 text-[#0c1c15] sm:px-8 sm:py-12 selection:bg-[#10b981]/20">
+    <main className="min-h-screen bg-background px-5 py-8 text-foreground sm:px-8 sm:py-12 selection:bg-accent/20">
       <div className="mx-auto max-w-5xl">
-        <div className="flex items-center justify-between">
-          <Link
-            href="/"
-            className="flex items-center gap-1.5 text-xs font-bold text-[#0f4c3a] hover:text-[#093326]"
-          >
-            <span>← Back to UniFetch</span>
-          </Link>
-
-          <div className="flex items-center gap-3">
-            <Link
-              href="/requests"
-              className="rounded-full border border-[#d6e3db] bg-white px-4 py-2 text-xs font-bold text-[#0f4c3a] shadow-xs hover:bg-[#edeae0] transition"
-            >
-              My Requests
-            </Link>
-
-            <Link
-              href="/request"
-              className="rounded-full bg-[#0f4c3a] px-4 py-2 text-xs font-bold text-white shadow-md shadow-[#0f4c3a]/20 hover:bg-[#0a382a] transition"
-            >
-              + Request Package
-            </Link>
-          </div>
-        </div>
+        <PageHeader
+          backHref="/"
+          backLabel="Back to UniFetch"
+          actions={
+            <>
+              <Link href="/requests" className="btn-ghost px-3 py-1.5 text-xs">
+                My Requests
+              </Link>
+              <Link href="/request" className="btn-primary px-4 py-1.5 text-xs">
+                + Request Package
+              </Link>
+            </>
+          }
+        />
 
         <div className="mt-8 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <span className="text-xs font-bold uppercase tracking-widest text-[#0f4c3a]">
-              Carrier Command Center
-            </span>
-            <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-[#081e15] sm:text-4xl">
+            <span className="eyebrow">Carrier Command Center</span>
+            <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-primary-hover sm:text-4xl">
               Carry on Your Way & Earn 🪙
             </h1>
-            <p className="mt-1 text-sm text-[#5c7a6e]">
+            <p className="mt-1 text-sm text-muted">
               Grab packages waiting at the gate and drop them at dorms with zero detour.
             </p>
           </div>
 
           <div className="flex gap-3">
-            <div className="rounded-2xl border border-[#e2dcd0] bg-white px-4 py-2.5 shadow-xs">
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-[#6b857a]">
-                Active Tasks
-              </span>
-              <span className="font-display text-xl font-bold text-[#0f4c3a]">
-                {activeDeliveriesCount}
-              </span>
-            </div>
-
-            <div className="rounded-2xl border border-[#e2dcd0] bg-white px-4 py-2.5 shadow-xs">
-              <span className="block text-[10px] font-bold uppercase tracking-wider text-[#6b857a]">
-                Completed
-              </span>
-              <span className="font-display text-xl font-bold text-[#0c241b]">
-                {completedDeliveriesCount}
-              </span>
-            </div>
+            <StatPill label="Active Tasks" value={activeDeliveriesCount} />
+            <StatPill label="Completed" value={completedDeliveriesCount} />
           </div>
         </div>
 
-        {errorMessage && (
-          <div className="mt-6 rounded-2xl border border-[#fecaca] bg-[#fff5f5] p-4 text-xs font-semibold text-[#991b1b]">
-            {errorMessage}
-          </div>
-        )}
+        <Alert tone="error" className="mt-6">{errorMessage}</Alert>
+        <Alert tone="success" className="mt-6">{successMessage}</Alert>
 
-        {successMessage && (
-          <div className="mt-6 rounded-2xl border border-[#bbf7d0] bg-[#f0fdf4] p-4 text-xs font-semibold text-[#065f46]">
-            {successMessage}
-          </div>
-        )}
-
-        <div className="mt-8 flex rounded-2xl border border-[#e2dcd0] bg-[#f0ebd9]/60 p-1.5 shadow-xs">
+        <div className="mt-8 flex rounded-2xl border border-border bg-surface-soft/60 p-1.5 shadow-[var(--shadow-sm)]">
           <button
             type="button"
             onClick={() => setActiveTab("available")}
             className={`flex-1 rounded-xl py-3 text-xs font-bold transition ${
               activeTab === "available"
-                ? "bg-white text-[#0f4c3a] shadow-sm"
-                : "text-[#5e776a] hover:text-[#0c241b]"
+                ? "bg-surface text-primary shadow-sm"
+                : "text-muted hover:text-primary-hover"
             }`}
           >
             Available at Gates ({availableRequests.length})
@@ -264,8 +243,8 @@ export default function CarryPackagePage() {
             onClick={() => setActiveTab("my_deliveries")}
             className={`flex-1 rounded-xl py-3 text-xs font-bold transition ${
               activeTab === "my_deliveries"
-                ? "bg-white text-[#0f4c3a] shadow-sm"
-                : "text-[#5e776a] hover:text-[#0c241b]"
+                ? "bg-surface text-primary shadow-sm"
+                : "text-muted hover:text-primary-hover"
             }`}
           >
             My Deliveries ({myDeliveries.length})
@@ -275,18 +254,18 @@ export default function CarryPackagePage() {
         {activeTab === "available" && (
           <div className="mt-6 space-y-6">
             <div className="flex flex-col gap-3 sm:flex-row">
-              <input
+              <Field
                 type="text"
                 placeholder="Search by hostel, item, or gate..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 rounded-2xl border border-[#d8d2c4] bg-white px-4 py-3 text-xs font-medium outline-none transition placeholder:text-[#9bb2a5] focus:border-[#0f4c3a] focus:ring-3 focus:ring-[#10b981]/15"
+                className="flex-1"
               />
 
               <select
                 value={filterGate}
                 onChange={(e) => setFilterGate(e.target.value)}
-                className="rounded-2xl border border-[#d8d2c4] bg-white px-4 py-3 text-xs font-bold text-[#446255] outline-none transition focus:border-[#0f4c3a]"
+                className="field w-full sm:w-auto"
               >
                 <option value="all">All Gates</option>
                 <option value="main">Main Gate</option>
@@ -296,75 +275,61 @@ export default function CarryPackagePage() {
             </div>
 
             {filteredRequests.length === 0 && (
-              <div className="mt-8 rounded-3xl border border-[#e2dcd0] bg-white p-12 text-center shadow-lg shadow-[#0c241b]/5">
-                <div className="text-5xl">✨</div>
-                <h3 className="mt-4 font-display text-xl font-bold text-[#0c241b]">
-                  No pending pickups right now
-                </h3>
-                <p className="mt-2 text-xs text-[#5c7a6e]">
-                  All packages at the gates have been claimed. Check back in a few minutes or subscribe to updates.
-                </p>
-              </div>
+              <EmptyState
+                icon={<span className="text-4xl">✨</span>}
+                title="No pending pickups right now"
+                description="All packages at the gates have been claimed. Check back in a few minutes or subscribe to updates."
+              />
             )}
 
             <div className="grid gap-5 md:grid-cols-2">
               {filteredRequests.map((request) => (
-                <div
-                  key={request.id}
-                  className="rounded-3xl border border-[#e2dcd0] bg-white p-6 shadow-md shadow-[#0c241b]/5 transition hover:shadow-xl hover:border-[#cbd7cf] flex flex-col justify-between"
-                >
+                <Card key={request.id} className="p-6 hover:shadow-[var(--shadow-lift)] hover:border-border-strong flex flex-col justify-between">
                   <div>
                     <div className="flex items-start justify-between gap-2">
-                      <span className="rounded-full bg-[#ecfdf5] border border-[#a7f3d0] px-3 py-1 text-[11px] font-bold text-[#065f46]">
+                      <Badge tone="success" className="bg-accent-tint border-accent/30 text-accent-strong">
                         📦 AVAILABLE NOW
-                      </span>
-                      <span className="rounded-full bg-[#fffbeb] border border-[#fde68a] px-3 py-1 text-xs font-bold text-[#b45309]">
+                      </Badge>
+                      <Badge tone="warning" className="bg-amber-tint border-amber/30 text-amber">
                         🪙 +35 Credits
-                      </span>
+                      </Badge>
                     </div>
 
-                    <h3 className="mt-4 font-display text-lg font-bold text-[#0c241b]">
+                    <h3 className="mt-4 font-display text-lg font-bold text-primary-hover">
                       {request.package_description}
                     </h3>
 
-                    <div className="mt-4 rounded-2xl bg-[#fbfaf6] border border-[#ebe5d8] p-4 text-xs space-y-2 text-[#466355]">
+                    <div className="mt-4 rounded-2xl border border-border bg-surface-soft p-4 text-xs space-y-2 text-muted">
                       <div className="flex items-center gap-2">
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#0f4c3a] text-[9px] font-bold text-white">
-                          A
-                        </span>
-                        <span className="truncate">
-                          <strong>From:</strong> {request.pickup_location}
-                        </span>
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-white">A</span>
+                        <span className="truncate"><strong>From:</strong> {request.pickup_location}</span>
                       </div>
-                      <div className="ml-2 h-2.5 w-0.5 bg-[#cbdad2]" />
+                      <div className="ml-2 h-2.5 w-0.5 bg-border" />
                       <div className="flex items-center gap-2">
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#10b981] text-[9px] font-bold text-white">
-                          B
-                        </span>
-                        <span className="truncate">
-                          <strong>To:</strong> {request.delivery_location}
-                        </span>
+                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-white">B</span>
+                        <span className="truncate"><strong>To:</strong> {request.delivery_location}</span>
                       </div>
                     </div>
 
-                    <p className="mt-3 text-[11px] text-[#789688]">
-                      Needed by: <strong>{new Date(request.pickup_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong> ({new Date(request.pickup_time).toLocaleDateString()})
+                    <p className="mt-3 text-[11px] text-muted">
+                      Needed by:{' '}
+                      <strong>{new Date(request.pickup_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>{' '}
+                      ({new Date(request.pickup_time).toLocaleDateString()})
                     </p>
                   </div>
 
-                  <div className="mt-6 pt-4 border-t border-[#f0ebe0]">
-                    <button
+                  <div className="mt-6 pt-4 border-t border-border">
+                    <Button
                       type="button"
                       onClick={() => handleClaim(request.id)}
                       disabled={claimingId === request.id}
-                      className="w-full rounded-2xl bg-[#0f4c3a] py-3.5 text-xs font-bold text-white shadow-md shadow-[#0f4c3a]/20 transition hover:bg-[#093326] hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60"
+                      size="lg"
+                      className="w-full"
                     >
-                      {claimingId === request.id
-                        ? "Claiming Delivery..."
-                        : "Claim & Deliver Package →"}
-                    </button>
+                      {claimingId === request.id ? "Claiming Delivery..." : "Claim & Deliver Package →"}
+                    </Button>
                   </div>
-                </div>
+                </Card>
               ))}
             </div>
           </div>
@@ -373,15 +338,11 @@ export default function CarryPackagePage() {
         {activeTab === "my_deliveries" && (
           <div className="mt-6 space-y-5">
             {myDeliveries.length === 0 && (
-              <div className="mt-8 rounded-3xl border border-[#e2dcd0] bg-white p-12 text-center shadow-lg shadow-[#0c241b]/5">
-                <div className="text-5xl">🚴</div>
-                <h3 className="mt-4 font-display text-xl font-bold text-[#0c241b]">
-                  You have no claimed deliveries yet
-                </h3>
-                <p className="mt-2 text-xs text-[#5c7a6e]">
-                  Switch to the &quot;Available at Gates&quot; tab to claim your first delivery run!
-                </p>
-              </div>
+              <EmptyState
+                icon={<span className="text-4xl">🚴</span>}
+                title="You have no claimed deliveries yet"
+                description={'Switch to the "Available at Gates" tab to claim your first delivery run!'}
+              />
             )}
 
             {myDeliveries.map((delivery) => {
@@ -389,32 +350,21 @@ export default function CarryPackagePage() {
               const isDelivered = delivery.status === "delivered";
 
               return (
-                <article
-                  key={delivery.id}
-                  className="rounded-3xl border border-[#e2dcd0] bg-white p-6 shadow-md shadow-[#0c241b]/5 transition sm:p-7"
-                >
+                <Card key={delivery.id} className="p-6 transition sm:p-7">
                   <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span
-                          className={`rounded-full px-3 py-1 text-[11px] font-bold ${
-                            isDelivered
-                              ? "bg-[#ecfdf5] text-[#065f46] border border-[#a7f3d0]"
-                              : "bg-[#eff6ff] text-[#1e40af] border border-[#bfdbfe] animate-pulse"
-                          }`}
-                        >
-                          {isDelivered ? "✓ DELIVERED" : "🚴 IN PROGRESS"}
-                        </span>
-                        <span className="text-xs text-[#7e998c]">
+                        <StatusBadge status={isDelivered ? "delivered" : "matched"} />
+                        <span className="text-xs text-muted">
                           Claimed {new Date(delivery.created_at).toLocaleDateString()}
                         </span>
                       </div>
 
-                      <h3 className="mt-2 font-display text-xl font-bold text-[#0c241b]">
+                      <h3 className="mt-2 font-display text-xl font-bold text-primary-hover">
                         {delivery.package_description}
                       </h3>
 
-                      <p className="mt-1 text-xs text-[#527163]">
+                      <p className="mt-1 text-xs text-muted">
                         <strong>Dropoff:</strong> {delivery.delivery_location} (from {delivery.pickup_location})
                       </p>
                     </div>
@@ -423,20 +373,20 @@ export default function CarryPackagePage() {
                       {isMatched && (
                         <Link
                           href={`/deliver/${delivery.id}`}
-                          className="inline-flex items-center rounded-2xl bg-[#0f4c3a] px-6 py-3 text-xs font-bold text-white shadow-md shadow-[#0f4c3a]/20 hover:bg-[#093326] transition"
+                          className="btn-primary px-6 py-3 text-xs"
                         >
                           Enter Requester OTP 🔑 →
                         </Link>
                       )}
 
                       {isDelivered && (
-                        <span className="rounded-2xl bg-[#f0fdf4] border border-[#bbf7d0] px-4 py-2 text-xs font-bold text-[#065f46]">
+                        <Badge tone="success" className="bg-success-tint border-success/30 text-success px-4 py-2 text-xs">
                           Completed +35 🪙
-                        </span>
+                        </Badge>
                       )}
                     </div>
                   </div>
-                </article>
+                </Card>
               );
             })}
           </div>
