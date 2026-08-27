@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useState } from "react";
-import { ShieldCheck, Quote, ArrowRight, Mail, Lock } from "lucide-react";
+import { ShieldAlert, ShieldCheck, ArrowRight, Mail, Lock } from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
-import { Button } from "../components/ui/Button";
-import { Field } from "../components/ui/Field";
-import { Alert } from "../components/ui/Alert";
+import { Button } from "../../components/ui/Button";
+import { Field } from "../../components/ui/Field";
+import { Alert } from "../../components/ui/Alert";
 
-export default function LoginPage() {
+export default function AdminLoginPage() {
   const router = useRouter();
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -38,44 +38,39 @@ export default function LoginPage() {
     }
 
     if (!loginData.user) {
-      setErrorMessage("Unable to get your account details.");
+      setErrorMessage("Unable to get account details.");
       setIsLoading(false);
       return;
     }
 
+    // Check if the user is an administrator
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("verification_status, college_id_url")
+      .select("role")
       .eq("id", loginData.user.id)
       .single();
 
-    if (profileError) {
+    if (profileError || !profile) {
       console.error("Profile error:", profileError);
-      setErrorMessage("Your account was created, but we could not check your verification status.");
+      await supabase.auth.signOut();
+      setErrorMessage("Access denied. Could not verify your administrator permissions.");
       setIsLoading(false);
       return;
     }
 
-    if (profile.verification_status === "approved") {
-      router.push("/");
-      router.refresh();
+    if (profile.role !== "admin") {
+      await supabase.auth.signOut();
+      setErrorMessage("Access denied. You do not have administrator privileges.");
+      setIsLoading(false);
       return;
     }
 
-    if (
-      profile.verification_status === "pending" ||
-      profile.verification_status === "rejected"
-    ) {
-      router.push("/verification");
-      router.refresh();
-      return;
-    }
-
-    setErrorMessage("Your verification status could not be determined. Please contact support.");
-    setIsLoading(false);
+    // Redirect to Admin Dashboard upon successful verification
+    router.push("/admin");
+    router.refresh();
   }
 
-  // React Spring animations for split panels
+  // React Spring entrance animations matching main login
   const leftPanelSpring = useSpring({
     from: { opacity: 0, transform: "translate3d(-25px, 0, 0)" },
     to: { opacity: 1, transform: "translate3d(0, 0, 0)" },
@@ -97,7 +92,6 @@ export default function LoginPage() {
           style={leftPanelSpring}
           className="relative hidden flex-col justify-between overflow-hidden bg-[#080d16] p-10 text-white lg:flex border-r border-[rgba(255,255,255,0.08)]"
         >
-          {/* Subtle blue mesh background glow */}
           <div className="absolute -right-24 -bottom-24 h-80 w-80 rounded-full bg-[#2563eb]/15 blur-3xl pointer-events-none" />
           <div className="absolute right-10 top-10 h-40 w-40 rounded-full bg-[#2563eb]/5 blur-2xl pointer-events-none" />
 
@@ -114,24 +108,24 @@ export default function LoginPage() {
           <div className="relative z-10 my-auto space-y-6">
             <div className="inline-flex items-center gap-2 rounded-full border border-[#2563eb]/20 bg-[#2563eb]/6 px-4 py-2 text-[9px] font-extrabold uppercase tracking-widest text-[#2563eb] shadow-sm">
               <ShieldCheck className="h-4 w-4" />
-              <span>Welcome back</span>
+              <span>Admin Console</span>
             </div>
 
             <h1 className="font-display text-4xl font-extrabold leading-[1.1] tracking-tighter text-white">
-              Your campus community is moving packages.
+              Secure Management & Trust Controls
             </h1>
 
             <p className="text-xs leading-relaxed text-[#cbd5e1] font-semibold">
-              Sign in to track your gate deliveries or pocket credits carrying parcels for dorm neighbors.
+              Log in to the administrator portal to review student ID uploads, verify registrations, and maintain platform security.
             </p>
 
             <div className="rounded-2xl border border-[rgba(255,255,255,0.06)] bg-[#05070b]/55 p-6 shadow-glow">
-              <Quote className="h-5 w-5 text-primary" />
+              <ShieldAlert className="h-5 w-5 text-primary" />
               <p className="mt-3 text-xs italic leading-relaxed text-[#cbd5e1] font-semibold">
-                {"\"UniFetch saved me 25 minutes of walking in the rain yesterday. The OTP handoff is super smooth.\""}
+                &quot;Trust and safety are the foundation of peer-to-peer campus logistics. Make sure student ID matches name and university before approving.&quot;
               </p>
               <p className="mt-3.5 text-[9px] font-extrabold text-[#2563eb] uppercase tracking-widest leading-none">
-                — Tanvi M., CS 3rd Year
+                — UniFetch Security Guidelines
               </p>
             </div>
           </div>
@@ -158,12 +152,12 @@ export default function LoginPage() {
               <span className="font-display font-bold tracking-tight">UniFetch</span>
             </Link>
 
-            <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Account access</span>
+            <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Admin access</span>
             <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tighter text-white">
-              Sign in to your account
+              Administrator Login
             </h2>
             <p className="mt-1 text-xs text-[#cbd5e1] font-semibold">
-              Enter your student email and password to continue.
+              Enter your administrator credentials to access dashboard.
             </p>
 
             <form className="mt-8 space-y-5" onSubmit={handleSubmit} noValidate>
@@ -174,8 +168,8 @@ export default function LoginPage() {
                   name="email"
                   type="email"
                   required
-                  label="Student email address"
-                  placeholder="you@college.edu"
+                  label="Admin email address"
+                  placeholder="admin@college.edu"
                   autoComplete="email"
                   className="pl-10"
                 />
@@ -201,7 +195,7 @@ export default function LoginPage() {
                     name="password"
                     type={showPassword ? "text" : "password"}
                     required
-                    placeholder="Enter your password"
+                    placeholder="Enter admin password"
                     autoComplete="current-password"
                     className="field pl-10"
                   />
@@ -216,18 +210,14 @@ export default function LoginPage() {
                 disabled={isLoading}
                 className="w-full flex items-center justify-center gap-1.5 mt-2 transition-transform duration-100 hover:scale-[1.01] active:scale-[0.99] uppercase tracking-wider text-xs py-3.5 shadow-glow"
               >
-                <span>{isLoading ? "Signing in…" : "Sign in"}</span>
+                <span>{isLoading ? "Verifying Admin…" : "Sign In to Console"}</span>
                 {!isLoading && <ArrowRight className="h-4 w-4" />}
               </Button>
             </form>
 
             <p className="mt-8 text-center text-xs text-[#cbd5e1] font-semibold">
-              Don&apos;t have an account yet?{" "}
-              <Link
-                href="/signup"
-                className="font-bold text-[#2563eb] underline underline-offset-4 hover:text-[#1d4ed8] transition-colors"
-              >
-                Create your student account (100 free credits)
+              <Link href="/login" className="font-bold text-[#2563eb] underline underline-offset-4 hover:text-[#1d4ed8] transition-colors">
+                Return to Student Login
               </Link>
             </p>
           </div>

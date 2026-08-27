@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Spinner, PageLoader } from "../components/ui/Spinner";
+import { PageLoader } from "../components/ui/Spinner";
 
 export default function AvailableRequestsPage() {
   const router = useRouter();

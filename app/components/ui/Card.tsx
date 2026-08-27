@@ -9,7 +9,7 @@ export function Card({
 }: React.HTMLAttributes<HTMLDivElement> & { hover?: boolean }) {
   return (
     <div
-      className={cn("card", hover && "card-hover", className)}
+      className={cn("neo-card", hover && "neo-card-hover", className)}
       {...props}
     >
       {children}

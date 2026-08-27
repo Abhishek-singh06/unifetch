@@ -1,17 +1,15 @@
 "use client";
 
 import { ChangeEvent, useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { ShieldCheck, UploadCloud, FileImage, ShieldAlert, Clock } from "lucide-react";
+import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { SidebarShell } from "../components/SidebarShell";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
-import { Field } from "../components/ui/Field";
 import { Alert } from "../components/ui/Alert";
 import { Badge } from "../components/ui/Badge";
-import { EmptyState } from "../components/ui/EmptyState";
-import { PageHeader } from "../components/ui/PageHeader";
-import { Spinner, PageLoader } from "../components/ui/Spinner";
+import { PageLoader } from "../components/ui/Spinner";
 
 export default function VerificationPage() {
   const router = useRouter();
@@ -151,6 +149,13 @@ export default function VerificationPage() {
     }
   }
 
+  // React Spring transitions for preview panel
+  const previewSpring = useSpring({
+    opacity: previewUrl ? 1 : 0,
+    transform: previewUrl ? "scale(1)" : "scale(0.95)",
+    config: { tension: 350, friction: 22 },
+  });
+
   if (isLoading) {
     return (
       <PageLoader label="Checking verification status..." />
@@ -158,118 +163,134 @@ export default function VerificationPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background px-5 py-8 text-foreground sm:px-8 sm:py-12 selection:bg-accent/20">
-      <div className="mx-auto max-w-3xl">
-        <PageHeader
-          backHref="/"
-          backLabel="Back to UniFetch"
-          actions={
-            <Badge
-              tone={
-                status === "approved" ? "success" :
-                status === "rejected" ? "danger" : "warning"
-              }
-            >
-              STATUS: {status.toUpperCase()}
-            </Badge>
-          }
-        />
-
-        <Card className="mt-8 p-6 sm:p-10">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary-tint text-lg">
-              🪪
-            </span>
-            <span className="eyebrow">Community Trust & Safety</span>
+    <SidebarShell>
+      <div className="p-6 sm:p-8 lg:p-10 space-y-8 max-w-4xl">
+        
+        {/* Title area */}
+        <div className="border-b border-[rgba(255,255,255,0.08)] pb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
+          <div>
+            <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Community Trust & Safety</span>
+            <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
+              Student ID Verification
+            </h1>
+            <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
+              UniFetch is an exclusive campus community. Verify your student credentials below.
+            </p>
           </div>
 
-          <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-primary-hover">
-            Student ID Verification
-          </h1>
+          <Badge
+            tone={
+              status === "approved" ? "success" :
+              status === "rejected" ? "danger" : "warning"
+            }
+            className="px-4 py-2 font-bold text-xs uppercase tracking-widest border shrink-0"
+          >
+            Status: {status}
+          </Badge>
+        </div>
 
-          <p className="mt-2 text-sm text-muted">
-            UniFetch is an exclusive student-only network. Upload a photo of your physical student ID card to unlock campus package requests and deliveries.
-          </p>
-
+        <div className="rounded-[2.5rem] border border-[rgba(255,255,255,0.08)] p-6 sm:p-8 bg-[#080d16]/30">
           {/* VERIFIED STATE */}
           {status === "approved" && (
-            <div className="mt-8 rounded-2xl border border-accent/30 bg-accent-tint p-6 text-center">
-              <span className="text-4xl">🎉</span>
-              <h2 className="mt-2 font-display text-2xl font-bold text-success">
-                You are Verified!
+            <div className="rounded-2xl border border-[#22c55e]/20 bg-[#22c55e]/6 p-8 text-center shadow-glow">
+              <ShieldCheck className="h-16 w-16 text-[#22c55e] mx-auto mb-4 animate-bounce" />
+              <h2 className="font-display text-2xl font-bold text-[#22c55e]">
+                You are verified student!
               </h2>
-              <p className="mt-2 text-xs text-muted">
-                Your college ID has been reviewed and approved. You have full access to request and carry packages across campus.
+              <p className="mt-3 text-xs text-[#cbd5e1] font-semibold max-w-md mx-auto leading-relaxed">
+                Your ID has been checked and approved by the admin verification team. You have full access to campus requests.
               </p>
-              <Button type="button" onClick={() => router.push("/")} size="lg" className="mt-6">
-                Go to UniFetch Campus Dashboard →
-              </Button>
             </div>
           )}
 
           {/* PENDING / REJECTED UPLOAD BOX */}
           {status !== "approved" && (
-            <div className="mt-8 space-y-6">
-              {/* Guidelines */}
-              <div className="rounded-2xl border border-border bg-surface-soft p-5 text-xs text-muted">
-                <p className="font-bold text-primary-hover mb-2">Photo Guidelines for Fast Approval:</p>
-                <ul className="space-y-1.5 text-muted">
-                  <li>• Photo must be well-lit with all text easily readable.</li>
-                  <li>• Student name and current academic validity year must be clearly visible.</li>
-                  <li>• Accepts JPG, PNG, or WebP (Max 5 MB).</li>
-                </ul>
-              </div>
-
-              {/* Upload Drop Area */}
-              <div>
-                <label
-                  htmlFor="collegeId"
-                  className="field-label"
-                >
-                  Upload College ID Photo
-                </label>
-
-                <input
-                  id="collegeId"
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  onChange={handleFileChange}
-                  className="block w-full cursor-pointer rounded-2xl border-2 border-dashed border-border bg-surface-soft p-6 text-xs text-muted file:mr-4 file:rounded-xl file:border-0 file:bg-[var(--color-primary)] file:px-4 file:py-2.5 file:text-xs file:font-bold file:text-white hover:border-primary transition"
-                />
-              </div>
-
-              {/* Preview Thumbnail */}
-              {previewUrl && (
-                <div className="rounded-2xl border border-accent/30 bg-primary-tint p-4 flex items-center gap-4">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={previewUrl}
-                    alt="ID Preview"
-                    className="h-20 w-28 object-cover rounded-xl border border-accent/30"
-                  />
+            <div className="space-y-6">
+              {status === "pending" && (
+                <div className="flex items-start gap-3.5 rounded-2xl border border-[#eab308]/20 bg-[#eab308]/6 p-5 text-xs text-[#eab308] font-bold">
+                  <Clock className="h-5.5 w-5.5 shrink-0 text-[#eab308]" />
                   <div>
-                    <p className="text-xs font-bold text-primary-hover">Selected File Ready to Upload</p>
-                    <p className="text-[11px] text-muted mt-0.5">{file?.name}</p>
+                    <p className="font-extrabold">Review In Progress</p>
+                    <p className="mt-1 font-semibold text-[#cbd5e1] leading-relaxed">We are currently verifying your student identity card. Access will be unlocked immediately upon approval.</p>
                   </div>
                 </div>
               )}
 
-              <Alert tone="error" className="">{error}</Alert>
-              <Alert tone="success" className="">{message}</Alert>
+              {status === "rejected" && (
+                <div className="flex items-start gap-3.5 rounded-2xl border border-[#ef4444]/20 bg-[#ef4444]/6 p-5 text-xs text-[#ef4444] font-bold">
+                  <ShieldAlert className="h-5.5 w-5.5 shrink-0 text-[#ef4444]" />
+                  <div>
+                    <p className="font-extrabold">Verification Rejected</p>
+                    <p className="mt-1 font-semibold text-[#cbd5e1] leading-relaxed">Your student card photo was rejected. Please re-upload a clear image containing readable text and valid dates.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Guidelines */}
+              <div className="rounded-2xl border border-[rgba(255,255,255,0.06)] bg-[#05070b]/60 p-5 text-xs text-[#cbd5e1] font-semibold leading-relaxed">
+                <p className="font-bold text-white mb-2.5 uppercase tracking-wider text-[10px]">Photo Requirements:</p>
+                <ul className="space-y-2 text-[#cbd5e1]/90">
+                  <li>• Photo must show your student ID card clearly.</li>
+                  <li>• Student name and academic validity year must be legible.</li>
+                  <li>• Accepts JPEG, PNG, or WebP up to 5MB size.</li>
+                </ul>
+              </div>
+
+              {/* Drop area */}
+              <div>
+                <label htmlFor="collegeId" className="field-label text-[10px] font-bold tracking-wider mb-3.5 uppercase">
+                  Upload Student ID Card Photo
+                </label>
+                <div className="relative group rounded-2xl border-2 border-dashed border-[rgba(255,255,255,0.08)] bg-white/3 p-10 text-center transition-all duration-150 hover:border-[#2563eb] hover:bg-[#2563eb]/5">
+                  <input
+                    id="collegeId"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleFileChange}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                  />
+                  <UploadCloud className="h-10 w-10 text-[#cbd5e1] mx-auto mb-3 group-hover:text-primary transition-colors animate-pulse" />
+                  <p className="text-xs font-bold text-white">
+                    {file ? file.name : "Drag and drop your ID card image here, or click to browse"}
+                  </p>
+                  <p className="text-[10px] text-[#cbd5e1] mt-1.5 font-semibold">JPEG, PNG, WebP up to 5MB</p>
+                </div>
+              </div>
+
+              {/* Preview Thumbnail */}
+              {previewUrl && (
+                <animated.div style={previewSpring} className="rounded-2xl border border-[#2563eb]/20 bg-[#2563eb]/6 p-4.5 flex items-center gap-4.5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={previewUrl}
+                    alt="ID Card Thumbnail"
+                    className="h-16 w-24 object-cover rounded-lg border border-[#2563eb]/20 shadow-glow"
+                  />
+                  <div>
+                    <p className="text-xs font-extrabold text-white flex items-center gap-2">
+                      <FileImage className="h-4.5 w-4.5 text-[#2563eb]" />
+                      Thumbnail Selected
+                    </p>
+                    <p className="text-[10px] text-[#cbd5e1] mt-1 font-mono truncate max-w-[240px]">{file?.name}</p>
+                  </div>
+                </animated.div>
+              )}
+
+              {error && <Alert tone="error">{error}</Alert>}
+              {message && <Alert tone="success">{message}</Alert>}
 
               <Button
                 type="button"
                 onClick={handleUpload}
                 disabled={isUploading || !file}
-                size="lg"
-                className="w-full"
+                className="w-full flex items-center justify-center gap-1.5 uppercase tracking-wider text-xs font-bold py-3.5 mt-2 shadow-glow"
               >
-                {isUploading ? "Uploading College ID..." : "Submit ID for Verification 🚀"}
+                <span>{isUploading ? "Uploading file..." : "Submit for Student Verification 🚀"}</span>
               </Button>
             </div>
           )}
-        </Card>
+        </div>
       </div>
-    </main>
+    </SidebarShell>
   );
 }

@@ -3,17 +3,15 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Search, Filter, Calendar, ArrowRight, ExternalLink, CheckCircle } from "lucide-react";
+import { useTransition, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
-import { Logo } from "../components/ui/Logo";
+import { SidebarShell } from "../components/SidebarShell";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
-import { Badge } from "../components/ui/Badge";
 import { Alert } from "../components/ui/Alert";
 import { EmptyState } from "../components/ui/EmptyState";
 import { StatPill } from "../components/ui/StatPill";
-import { PageHeader } from "../components/ui/PageHeader";
 import { StatusBadge } from "../components/ui/StatusBadge";
-import { Field } from "../components/ui/Field";
 
 type PackageRequest = {
   id: string;
@@ -30,7 +28,6 @@ type PackageRequest = {
 export default function CarryPackagePage() {
   const router = useRouter();
 
-  const [activeTab, setActiveTab] = useState<"available" | "my_deliveries">("available");
   const [availableRequests, setAvailableRequests] = useState<PackageRequest[]>([]);
   const [myDeliveries, setMyDeliveries] = useState<PackageRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -55,8 +52,6 @@ export default function CarryPackagePage() {
         return;
       }
 
-      // NOTE: pickup_otp is intentionally not selectable — it lives in a
-      // private table and is never exposed to carriers.
       const { data: available, error: availableError } = await supabase
         .from("package_requests")
         .select(
@@ -131,8 +126,6 @@ export default function CarryPackagePage() {
       return;
     }
 
-    // Atomic RPC: if another carrier claimed first, this reports FALSE instead
-    // of silently succeeding with zero rows updated.
     const { data: claimed, error } = await supabase.rpc("claim_package_request", {
       p_request_id: requestId,
     });
@@ -149,7 +142,7 @@ export default function CarryPackagePage() {
       return;
     }
 
-    setSuccessMessage("🎉 Package claimed! Head over to complete the OTP delivery.");
+    setSuccessMessage("🎉 Package claimed! Redirecting to OTP verification page...");
     setTimeout(() => {
       router.push(`/deliver/${requestId}`);
     }, 1000);
@@ -171,227 +164,232 @@ export default function CarryPackagePage() {
   const activeDeliveriesCount = myDeliveries.filter((d) => d.status === "matched").length;
   const completedDeliveriesCount = myDeliveries.filter((d) => d.status === "delivered").length;
 
+  const availableTransitions = useTransition(filteredRequests, {
+    keys: (item) => item.id,
+    from: { opacity: 0, transform: "translate3d(0, 15px, 0)" },
+    enter: { opacity: 1, transform: "translate3d(0, 0, 0)" },
+    leave: { opacity: 0, transform: "translate3d(0, -10px, 0)", height: 0, margin: 0, padding: 0 },
+    trail: 35,
+    config: { tension: 300, friction: 22 },
+  });
+
   if (loading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background">
+      <main className="flex min-h-screen items-center justify-center bg-[#05070b]">
         <div className="text-center">
-          <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-white shadow-[var(--shadow-primary)]">
-            <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+          <span className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-white shadow-glow animate-bounce mx-auto">
+            <svg className="h-6 w-6 animate-spin text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
               <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
             </svg>
           </span>
-          <p className="mt-4 text-xs font-semibold tracking-wide text-muted">Loading gate pickups...</p>
+          <p className="mt-5 text-[10px] font-extrabold tracking-widest text-[#cbd5e1] font-display uppercase">
+            Loading gate pickups...
+          </p>
         </div>
       </main>
     );
   }
 
   return (
-    <main className="min-h-screen bg-background px-5 py-8 text-foreground sm:px-8 sm:py-12 selection:bg-accent/20">
-      <div className="mx-auto max-w-5xl">
-        <PageHeader
-          backHref="/"
-          backLabel="Back to UniFetch"
-          actions={
-            <>
-              <Link href="/requests" className="btn-ghost px-3 py-1.5 text-xs">
-                My Requests
-              </Link>
-              <Link href="/request" className="btn-primary px-4 py-1.5 text-xs">
-                + Request Package
-              </Link>
-            </>
-          }
-        />
-
-        <div className="mt-8 flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+    <SidebarShell>
+      <div className="p-6 sm:p-8 lg:p-10 space-y-8">
+        
+        {/* Title area */}
+        <div className="border-b border-[rgba(255,255,255,0.08)] pb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
           <div>
-            <span className="eyebrow">Carrier Command Center</span>
-            <h1 className="mt-2 font-display text-3xl font-extrabold tracking-tight text-primary-hover sm:text-4xl">
-              Carry on Your Way & Earn 🪙
+            <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Carrier Marketplace</span>
+            <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
+              Carry & Earn Campus Credits
             </h1>
-            <p className="mt-1 text-sm text-muted">
-              Grab packages waiting at the gate and drop them at dorms with zero detour.
+            <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
+              Select student parcels waiting at campus gates and drop them at hostel lobbies.
             </p>
           </div>
 
-          <div className="flex gap-3">
-            <StatPill label="Active Tasks" value={activeDeliveriesCount} />
-            <StatPill label="Completed" value={completedDeliveriesCount} />
+          <div className="flex items-center gap-3 shrink-0">
+            <StatPill label="Active Runs" value={activeDeliveriesCount} />
+            <StatPill label="Delivered" value={completedDeliveriesCount} />
           </div>
         </div>
 
-        <Alert tone="error" className="mt-6">{errorMessage}</Alert>
-        <Alert tone="success" className="mt-6">{successMessage}</Alert>
+        {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
+        {successMessage && <Alert tone="success">{successMessage}</Alert>}
 
-        <div className="mt-8 flex rounded-2xl border border-border bg-surface-soft/60 p-1.5 shadow-[var(--shadow-sm)]">
-          <button
-            type="button"
-            onClick={() => setActiveTab("available")}
-            className={`flex-1 rounded-xl py-3 text-xs font-bold transition ${
-              activeTab === "available"
-                ? "bg-surface text-primary shadow-sm"
-                : "text-muted hover:text-primary-hover"
-            }`}
-          >
-            Available at Gates ({availableRequests.length})
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab("my_deliveries")}
-            className={`flex-1 rounded-xl py-3 text-xs font-bold transition ${
-              activeTab === "my_deliveries"
-                ? "bg-surface text-primary shadow-sm"
-                : "text-muted hover:text-primary-hover"
-            }`}
-          >
-            My Deliveries ({myDeliveries.length})
-          </button>
-        </div>
-
-        {activeTab === "available" && (
-          <div className="mt-6 space-y-6">
-            <div className="flex flex-col gap-3 sm:flex-row">
-              <Field
-                type="text"
-                placeholder="Search by hostel, item, or gate..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1"
-              />
-
-              <select
-                value={filterGate}
-                onChange={(e) => setFilterGate(e.target.value)}
-                className="field w-full sm:w-auto"
-              >
-                <option value="all">All Gates</option>
-                <option value="main">Main Gate</option>
-                <option value="north">North Turnstile</option>
-                <option value="post">Post Office Gate</option>
-              </select>
+        {/* Split desktop workspace */}
+        <div className="grid gap-8 lg:grid-cols-[1.6fr_0.9fr] items-start">
+          
+          {/* Left Column: list of available packages */}
+          <div className="space-y-6">
+            <div className="border-b border-[rgba(255,255,255,0.08)] pb-3 flex items-center justify-between">
+              <h2 className="font-display text-xl font-bold text-white flex items-center gap-2.5">
+                <span>Available Packages</span>
+                <span className="rounded-full bg-white/5 text-[#cbd5e1] text-xs font-bold px-2.5 py-0.5 border border-[rgba(255,255,255,0.08)]">
+                  {filteredRequests.length}
+                </span>
+              </h2>
             </div>
 
-            {filteredRequests.length === 0 && (
+            {/* Filter controls */}
+            <div className="flex flex-col gap-3 sm:flex-row items-stretch">
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-muted" />
+                <input
+                  type="text"
+                  placeholder="Search by hostel block, gate or item description..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="field pl-10.5"
+                />
+              </div>
+
+              <div className="relative shrink-0">
+                <Filter className="absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-muted pointer-events-none" />
+                <select
+                  value={filterGate}
+                  onChange={(e) => setFilterGate(e.target.value)}
+                  className="field pl-10.5 pr-8 appearance-none bg-[#0a0f18]"
+                >
+                  <option value="all">All Gates</option>
+                  <option value="main">Main Gate</option>
+                  <option value="north">North Turnstile</option>
+                  <option value="post">Post Office Gate</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Request Card Feed */}
+            {filteredRequests.length === 0 ? (
               <EmptyState
-                icon={<span className="text-4xl">✨</span>}
-                title="No pending pickups right now"
-                description="All packages at the gates have been claimed. Check back in a few minutes or subscribe to updates."
+                icon={<Search className="h-10 w-10 text-primary" />}
+                title="No pending pickups found"
+                description="Try modifying your keywords or search filters."
               />
+            ) : (
+              <div className="grid gap-5 sm:grid-cols-2">
+                {availableTransitions((style, request) => (
+                  <animated.div style={style}>
+                    <div className="rounded-[2rem] border border-[rgba(255,255,255,0.08)] p-5 bg-[#080d16]/30 hover:border-[#2563eb]/45 flex flex-col justify-between min-h-[290px] transition-all duration-200">
+                      <div>
+                        <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] pb-3">
+                          <span className="flex items-center gap-1.5 text-[9px] font-extrabold text-[#22c55e] uppercase tracking-widest bg-[#22c55e]/10 border border-[#22c55e]/20 px-2.5 py-0.5 rounded-full">
+                            <span className="live-dot h-1.5 w-1.5 bg-[#22c55e]" />
+                            Open
+                          </span>
+                          <span className="text-[10px] font-bold text-[#2563eb] uppercase tracking-wider bg-[#2563eb]/10 border border-[#2563eb]/20 px-2.5 py-0.5 rounded-full drop-shadow-[0_0_10px_rgba(37,99,235,0.15)]">
+                            🪙 +35 Credits
+                          </span>
+                        </div>
+
+                        <h3 className="mt-3.5 font-display text-base font-bold text-white line-clamp-2 leading-tight">
+                          {request.package_description}
+                        </h3>
+
+                        {/* Location Box */}
+                        <div className="mt-4 rounded-xl border border-[rgba(255,255,255,0.06)] bg-[#05070b]/60 p-3.5 text-xs space-y-1.5 text-[#cbd5e1] font-semibold">
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg bg-[#2563eb]/15 text-[9px] font-bold text-[#2563eb] border border-[#2563eb]/25">A</span>
+                            <span className="truncate text-white">Pickup: {request.pickup_location}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg bg-[#2563eb]/15 text-[9px] font-bold text-[#2563eb] border border-[#2563eb]/25">B</span>
+                            <span className="truncate text-white">Dorm: {request.delivery_location}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-4">
+                        <p className="text-[9px] text-[#cbd5e1] font-bold flex items-center gap-2 uppercase tracking-wider mb-3">
+                          <Calendar className="h-3.5 w-3.5 text-[#2563eb]" />
+                          Needed: {new Date(request.pickup_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </p>
+
+                        <Button
+                          type="button"
+                          onClick={() => handleClaim(request.id)}
+                          disabled={claimingId === request.id}
+                          className="w-full flex items-center justify-center gap-1.5 uppercase tracking-wider text-xs font-bold py-3 shadow-glow"
+                        >
+                          <span>Claim & Fetch</span>
+                          <ArrowRight className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  </animated.div>
+                ))}
+              </div>
             )}
+          </div>
 
-            <div className="grid gap-5 md:grid-cols-2">
-              {filteredRequests.map((request) => (
-                <Card key={request.id} className="p-6 hover:shadow-[var(--shadow-lift)] hover:border-border-strong flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-start justify-between gap-2">
-                      <Badge tone="success" className="bg-accent-tint border-accent/30 text-accent-strong">
-                        📦 AVAILABLE NOW
-                      </Badge>
-                      <Badge tone="warning" className="bg-amber-tint border-amber/30 text-amber">
-                        🪙 +35 Credits
-                      </Badge>
-                    </div>
+          {/* Right Column: Claimed package runs */}
+          <aside className="space-y-6 lg:sticky lg:top-[85px]">
+            <div className="border-b border-[rgba(255,255,255,0.08)] pb-3">
+              <h2 className="font-display text-xl font-bold text-white flex items-center gap-2">
+                <span>My Claimed Runs</span>
+              </h2>
+            </div>
 
-                    <h3 className="mt-4 font-display text-lg font-bold text-primary-hover">
-                      {request.package_description}
-                    </h3>
+            {myDeliveries.length === 0 ? (
+              <div className="rounded-[2rem] border border-dashed border-[rgba(255,255,255,0.08)] p-8 text-center text-xs font-bold text-[#cbd5e1] uppercase tracking-widest bg-white/2 select-none">
+                No active delivery runs claimed
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {myDeliveries.map((delivery) => {
+                  const isMatched = delivery.status === "matched";
+                  const isDelivered = delivery.status === "delivered";
 
-                    <div className="mt-4 rounded-2xl border border-border bg-surface-soft p-4 text-xs space-y-2 text-muted">
-                      <div className="flex items-center gap-2">
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-white">A</span>
-                        <span className="truncate"><strong>From:</strong> {request.pickup_location}</span>
-                      </div>
-                      <div className="ml-2 h-2.5 w-0.5 bg-border" />
-                      <div className="flex items-center gap-2">
-                        <span className="flex h-4 w-4 items-center justify-center rounded-full bg-accent text-[9px] font-bold text-white">B</span>
-                        <span className="truncate"><strong>To:</strong> {request.delivery_location}</span>
-                      </div>
-                    </div>
-
-                    <p className="mt-3 text-[11px] text-muted">
-                      Needed by:{' '}
-                      <strong>{new Date(request.pickup_time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</strong>{' '}
-                      ({new Date(request.pickup_time).toLocaleDateString()})
-                    </p>
-                  </div>
-
-                  <div className="mt-6 pt-4 border-t border-border">
-                    <Button
-                      type="button"
-                      onClick={() => handleClaim(request.id)}
-                      disabled={claimingId === request.id}
-                      size="lg"
-                      className="w-full"
+                  return (
+                    <div
+                      key={delivery.id}
+                      className="rounded-3xl border border-[rgba(255,255,255,0.08)] p-5 bg-[#080d16]/30 hover:border-[#2563eb]/20 transition-all duration-200"
                     >
-                      {claimingId === request.id ? "Claiming Delivery..." : "Claim & Deliver Package →"}
-                    </Button>
-                  </div>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {activeTab === "my_deliveries" && (
-          <div className="mt-6 space-y-5">
-            {myDeliveries.length === 0 && (
-              <EmptyState
-                icon={<span className="text-4xl">🚴</span>}
-                title="You have no claimed deliveries yet"
-                description={'Switch to the "Available at Gates" tab to claim your first delivery run!'}
-              />
-            )}
-
-            {myDeliveries.map((delivery) => {
-              const isMatched = delivery.status === "matched";
-              const isDelivered = delivery.status === "delivered";
-
-              return (
-                <Card key={delivery.id} className="p-6 transition sm:p-7">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] pb-3">
                         <StatusBadge status={isDelivered ? "delivered" : "matched"} />
-                        <span className="text-xs text-muted">
-                          Claimed {new Date(delivery.created_at).toLocaleDateString()}
+                        <span className="text-[9px] text-[#cbd5e1] font-bold uppercase tracking-widest">
+                          {new Date(delivery.created_at).toLocaleDateString()}
                         </span>
                       </div>
 
-                      <h3 className="mt-2 font-display text-xl font-bold text-primary-hover">
+                      <h3 className="mt-3 font-display text-sm font-bold text-white truncate">
                         {delivery.package_description}
                       </h3>
 
-                      <p className="mt-1 text-xs text-muted">
-                        <strong>Dropoff:</strong> {delivery.delivery_location} (from {delivery.pickup_location})
-                      </p>
-                    </div>
+                      <div className="mt-2.5 text-[11px] text-[#cbd5e1] font-semibold space-y-1">
+                        <p>From: {delivery.pickup_location}</p>
+                        <p>To: {delivery.delivery_location}</p>
+                      </div>
 
-                    <div>
+                      {/* Claimed Action link */}
                       {isMatched && (
-                        <Link
-                          href={`/deliver/${delivery.id}`}
-                          className="btn-primary px-6 py-3 text-xs"
-                        >
-                          Enter Requester OTP 🔑 →
-                        </Link>
+                        <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)]">
+                          <Link
+                            href={`/deliver/${delivery.id}`}
+                            className="neo-btn-primary w-full py-2.5 text-xs uppercase tracking-widest font-extrabold gap-1.5 shadow-glow"
+                          >
+                            <span>Verify OTP</span>
+                            <ExternalLink className="h-3.5 w-3.5" />
+                          </Link>
+                        </div>
                       )}
 
                       {isDelivered && (
-                        <Badge tone="success" className="bg-success-tint border-success/30 text-success px-4 py-2 text-xs">
-                          Completed +35 🪙
-                        </Badge>
+                        <div className="mt-4 pt-3 border-t border-[rgba(255,255,255,0.06)] text-center">
+                          <span className="inline-flex items-center gap-1.5 text-[10px] font-bold text-[#22c55e] uppercase tracking-wider bg-[#22c55e]/6 border border-[#22c55e]/20 px-3 py-1 rounded-full">
+                            <CheckCircle className="h-4 w-4" />
+                            Completed (+35 Credits)
+                          </span>
+                        </div>
                       )}
                     </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
-        )}
+                  );
+                })}
+              </div>
+            )}
+          </aside>
+
+        </div>
       </div>
-    </main>
+    </SidebarShell>
   );
 }

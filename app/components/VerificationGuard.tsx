@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { supabase } from "../lib/supabase/client";
-import { Spinner, PageLoader } from "../components/ui/Spinner";
+import { PageLoader } from "../components/ui/Spinner";
 
 export default function VerificationGuard({
   children,
@@ -17,13 +17,17 @@ export default function VerificationGuard({
 
   useEffect(() => {
     async function checkVerification() {
+      const isAdminRoute = pathname.startsWith("/admin");
+      const isAdminLogin = pathname === "/admin/login";
+
       // Public routes that unauthenticated guests can access
       const isPublicRoute =
         pathname === "/" ||
         pathname === "/login" ||
         pathname === "/signup" ||
         pathname === "/verification" ||
-        pathname.startsWith("/auth");
+        pathname.startsWith("/auth") ||
+        isAdminLogin;
 
       if (isPublicRoute) {
         setChecking(false);
@@ -37,19 +41,39 @@ export default function VerificationGuard({
 
       // If not logged in, redirect to login
       if (!user) {
-        router.replace("/login");
+        if (isAdminRoute) {
+          router.replace("/admin/login");
+        } else {
+          router.replace("/login");
+        }
         return;
       }
 
-      // Get user verification status
+      // Get user verification status and role
       const { data: profile, error } = await supabase
         .from("profiles")
-        .select("verification_status")
+        .select("verification_status, role")
         .eq("id", user.id)
         .single();
 
       if (error || !profile) {
         console.error("Could not check verification status:", error);
+        setChecking(false);
+        return;
+      }
+
+      // Admin route checks
+      if (isAdminRoute) {
+        if (profile.role !== "admin") {
+          router.replace("/admin/login");
+          return;
+        }
+        setChecking(false);
+        return;
+      }
+
+      // Admins bypass normal verification checks when browsing normal pages
+      if (profile.role === "admin") {
         setChecking(false);
         return;
       }

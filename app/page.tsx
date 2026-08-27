@@ -1,25 +1,37 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, X, Plus } from "lucide-react";
+import {
+  Menu,
+  X,
+  Check,
+  Shield,
+  Award,
+  HelpCircle,
+  Package,
+  MapPin,
+  Navigation,
+  Clock,
+  ThumbsUp,
+  User,
+  Percent,
+  MessageSquare,
+  Truck
+} from "lucide-react";
+import { useSpring, useTransition, animated, config, useTrail } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
-import { Logo } from "./components/ui/Logo";
+import { LogoMark } from "./components/ui/Logo";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
-import { Badge } from "./components/ui/Badge";
-import { Alert } from "./components/ui/Alert";
-import { EmptyState } from "./components/ui/EmptyState";
-import { StatPill } from "./components/ui/StatPill";
-import { PageHeader } from "./components/ui/PageHeader";
 
 const tickerItems = [
-  "⚡ Arjun K. picked up an Amazon box for Priya at Hostel 4",
-  "🪙 Sneha earned +35 credits heading to Main Gate",
-  "🛡️ 100% verified student handoff completed at Block C",
-  "📦 Food parcel delivered to Library Desk 22 in 14 mins",
-  "⭐ Campus Trust Rating: 4.92 / 5.0 across 1,420+ deliveries",
+  "⚡ Rahul accepted a package to Library Gate",
+  "🪙 Sneha delivered to Hostel 3",
+  "🛡️ Aman is on the way to Main Gate",
+  "📦 Food parcel delivered to Hostel 4 in 12 mins",
+  "⭐ Campus Trust Rating: 4.95 / 5.0 across 1,420+ deliveries"
 ];
 
 const mockPreviews = [
@@ -27,7 +39,7 @@ const mockPreviews = [
     id: "amazon",
     label: "📦 Amazon Package",
     item: "AirPods Pro & Books",
-    pickup: "Main Gate • Security Parcel Desk",
+    pickup: "Main Gate • Security Desk",
     dropoff: "Hostel 3 • Room 214",
     status: "Carrier En Route",
     carrier: "Devansh R.",
@@ -36,13 +48,17 @@ const mockPreviews = [
     eta: "Arriving in 6 mins",
     credits: "+30",
     progress: 75,
+    pathCoords: "M 30,130 C 50,80 120,80 140,110 C 160,140 220,150 250,90",
+    dotACoords: { x: 30, y: 130 },
+    dotBCoords: { x: 250, y: 90 },
+    dotCarrierCoords: { x: 170, y: 135 }
   },
   {
     id: "food",
     label: "🍔 Food & Drinks",
     item: "Subway Meal + Cold Coffee",
-    pickup: "North Turnstile • Delivery Zone B",
-    dropoff: "Girls Hostel Block A • Lobby",
+    pickup: "North Turnstile Gate",
+    dropoff: "Girls Hostel Block A",
     status: "Picked Up",
     carrier: "Meera S.",
     branch: "CS '25",
@@ -50,12 +66,16 @@ const mockPreviews = [
     eta: "Arriving in 9 mins",
     credits: "+40",
     progress: 50,
+    pathCoords: "M 40,80 C 100,70 120,160 170,120 C 200,90 230,130 260,140",
+    dotACoords: { x: 40, y: 80 },
+    dotBCoords: { x: 260, y: 140 },
+    dotCarrierCoords: { x: 150, y: 135 }
   },
   {
     id: "prints",
     label: "📄 Documents / Prints",
-    item: "Project Report (Spiral Bound)",
-    pickup: "Campus Post Office Gate",
+    item: "Project Report (Spiral)",
+    pickup: "Campus Post Office",
     dropoff: "Science Block • Lab 402",
     status: "Matched with Carrier",
     carrier: "Karan T.",
@@ -63,8 +83,12 @@ const mockPreviews = [
     rating: "4.8 ★ (19 runs)",
     eta: "Pickup in 4 mins",
     credits: "+25",
-    progress: 30,
-  },
+    progress: 20,
+    pathCoords: "M 50,140 C 90,120 140,150 180,90 C 210,50 230,80 250,110",
+    dotACoords: { x: 50, y: 140 },
+    dotBCoords: { x: 250, y: 110 },
+    dotCarrierCoords: { x: 90, y: 120 }
+  }
 ];
 
 const faqs = [
@@ -95,6 +119,66 @@ export default function Home() {
   const [selectedPreview, setSelectedPreview] = useState(0);
   const [ordersPerWeek, setOrdersPerWeek] = useState(3);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  
+  // Real stats state
+  const [realStats, setRealStats] = useState({
+    activeStudents: "2K+",
+    deliveredPackages: "850+",
+    successRate: "99.2%",
+    support: "24/7"
+  });
+
+  // Dynamic Ticker
+  const [tickerList, setTickerList] = useState(tickerItems);
+
+  useEffect(() => {
+    async function loadRealStatsAndActivity() {
+      try {
+        // Query active students count
+        const { count: studentCount } = await supabase
+          .from("profiles")
+          .select("id", { count: "exact", head: true });
+
+        // Query total delivered requests
+        const { count: deliveredCount } = await supabase
+          .from("package_requests")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "delivered");
+
+        // Format and set stats
+        setRealStats({
+          activeStudents: studentCount && studentCount > 0 ? `${studentCount}+` : "2K+",
+          deliveredPackages: deliveredCount && deliveredCount > 0 ? `${deliveredCount}+` : "850+",
+          successRate: "99.2%",
+          support: "24/7"
+        });
+
+        // Query latest 5 deliveries/requests for activity feed
+        const { data: recentRequests } = await supabase
+          .from("package_requests")
+          .select("package_description, pickup_location, delivery_location, status, created_at")
+          .order("created_at", { ascending: false })
+          .limit(5);
+
+        if (recentRequests && recentRequests.length > 0) {
+          const formatted = recentRequests.map((req) => {
+            const desc = req.package_description || "Package";
+            const statusMap: Record<string, string> = {
+              pending: `pickup posted at ${req.pickup_location}`,
+              accepted: `is on its way from ${req.pickup_location}`,
+              delivered: `delivered to ${req.delivery_location}`
+            };
+            return `📦 ${desc} ${statusMap[req.status] || "delivery updated"}`;
+          });
+          setTickerList(formatted);
+        }
+      } catch (err) {
+        console.error("Error loading home page stats:", err);
+      }
+    }
+    loadRealStatsAndActivity();
+  }, []);
 
   useEffect(() => {
     async function getUser() {
@@ -143,533 +227,852 @@ export default function Home() {
     router.refresh();
   }
 
+  // React Spring transitions / springs
+  const heroFadeSpring = useSpring({
+    from: { opacity: 0, transform: "translate3d(0, 30px, 0)" },
+    to: { opacity: 1, transform: "translate3d(0, 0, 0)" },
+    config: config.gentle,
+  });
+
+  const mobileMenuTransition = useTransition(mobileMenuOpen, {
+    from: { opacity: 0, height: 0, transform: "translate3d(0, -10px, 0)" },
+    enter: { opacity: 1, height: "auto", transform: "translate3d(0, 0, 0)" },
+    leave: { opacity: 0, height: 0, transform: "translate3d(0, -10px, 0)" },
+    config: { tension: 300, friction: 23 },
+  });
+
+  const activeMock = mockPreviews[selectedPreview];
+  const radarTransition = useTransition(selectedPreview, {
+    key: selectedPreview,
+    from: { opacity: 0, transform: "translate3d(15px, 0, 0)" },
+    enter: { opacity: 1, transform: "translate3d(0, 0, 0)" },
+    leave: { opacity: 0, transform: "translate3d(-15px, 0, 0)" },
+    exitBeforeEnter: true,
+    config: { tension: 280, friction: 22 },
+  });
+
+  const progressBarSpring = useSpring({
+    width: `${activeMock.progress}%`,
+    config: { tension: 120, friction: 18 },
+  });
+
+  // How it works trail animation on viewport scroll simulation
+  const stepsTrail = useTrail(3, {
+    from: { opacity: 0, transform: "translate3d(0, 40px, 0)" },
+    to: { opacity: 1, transform: "translate3d(0, 0, 0)" },
+    config: config.slow,
+  });
+
   if (isCheckingUser) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-background">
+      <main className="flex min-h-screen items-center justify-center bg-[#05070b]">
         <div className="text-center">
-          <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl bg-primary text-white shadow-[var(--shadow-primary)]">
-            <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+          <span className="relative flex h-12 w-12 items-center justify-center rounded-2xl bg-primary text-white shadow-glow animate-bounce mx-auto">
+            <svg className="h-6 w-6 animate-spin text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <circle cx="12" cy="12" r="10" strokeOpacity="0.2" />
               <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
             </svg>
           </span>
-          <p className="mt-4 text-xs font-semibold tracking-wide text-muted">
-            UniFetch Campus Network
+          <p className="mt-5 text-[10px] font-extrabold tracking-widest text-[#cbd5e1] font-display uppercase">
+            UniFetch Peer Network
           </p>
         </div>
       </main>
     );
   }
 
-  const activeMock = mockPreviews[selectedPreview];
   const stepsSaved = ordersPerWeek * 1800 * 16;
   const hoursSaved = Math.round((ordersPerWeek * 22 * 16) / 60);
 
   return (
-    <main className="min-h-screen bg-background text-foreground selection:bg-accent/20 selection:text-primary-hover">
-      {/* Top Banner Ticker */}
-      <div className="overflow-hidden border-b border-border bg-primary py-2 text-xs font-medium text-[#a7d9c4]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-accent" />
-            </span>
-            <span className="font-semibold text-white">Campus Live:</span>
-            <span className="hidden sm:inline text-[#c4e8d8]">{tickerItems[0]}</span>
-            <span className="sm:hidden text-[#c4e8d8]">14 gate packages waiting</span>
-          </div>
-
-          <div className="flex items-center gap-4 text-[11px] text-[#86bba4]">
-            <span className="hidden md:inline">🔒 Verified Campus Network</span>
-            <span>⚡ Avg Handoff: ~18 min</span>
-          </div>
-        </div>
-      </div>
+    <main className="min-h-screen bg-[#05070b] text-[#ffffff] selection:bg-[#2563eb]/30 selection:text-white grid-bg relative overflow-x-hidden">
+      {/* Background Atmosphere Glows */}
+      <div className="absolute top-[-10%] left-[10%] w-[500px] h-[500px] rounded-full bg-[#2563eb]/8 blur-[130px] pointer-events-none" />
+      <div className="absolute top-[20%] right-[-10%] w-[600px] h-[600px] rounded-full bg-[#3b82f6]/6 blur-[150px] pointer-events-none" />
+      <div className="absolute bottom-[15%] left-[5%] w-[450px] h-[450px] rounded-full bg-[#2563eb]/6 blur-[120px] pointer-events-none" />
 
       {/* Navigation Header */}
-      <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-4 sm:px-8">
-          <Link href="/" className="flex items-center gap-2.5 group" aria-label="UniFetch Home">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white shadow-[var(--shadow-primary)] transition group-hover:scale-105 group-hover:bg-primary-hover">
-              <LogoMark className="h-5 w-5" />
+      <header className="sticky top-0 z-50 border-b border-[rgba(255,255,255,0.08)] bg-[#05070b]/75 backdrop-blur-md">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-8">
+          <Link href="/" className="flex items-center gap-3.5 group" aria-label="UniFetch Home">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white border border-primary/20 shadow-primary transition-transform duration-200 group-hover:scale-105">
+              <LogoMark className="h-5.5 w-5.5" />
             </div>
             <div>
-              <span className="font-display text-xl font-bold tracking-tight text-primary-hover">UniFetch</span>
-              <span className="block text-[10px] font-semibold uppercase tracking-wider text-muted">Campus Peer Network</span>
+              <span className="font-display text-xl font-bold tracking-tight text-white block leading-none">UniFetch</span>
+              <span className="block text-[8px] font-extrabold uppercase tracking-widest text-[#2563eb] mt-1.5">Campus Logistics</span>
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-7 text-sm font-semibold text-muted md:flex">
-            <a href="#how-it-works" className="transition hover:text-primary">How It Works</a>
-            <a href="#calculator" className="transition hover:text-primary">Step Calculator</a>
-            <a href="#trust" className="transition hover:text-primary">Safety & OTP</a>
-            <a href="#faqs" className="transition hover:text-primary">FAQs</a>
+          <nav className="hidden items-center gap-8 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] md:flex">
+            <a href="#how-it-works" className="transition hover:text-white">How It Works</a>
+            <a href="#features" className="transition hover:text-white">Features</a>
+            <a href="#calculator" className="transition hover:text-white">For Campus</a>
+            <a href="#faqs" className="transition hover:text-white">FAQs</a>
 
             {isLoggedIn && (
               <>
-                <Link href="/requests" className="btn-ghost px-3 py-1.5 text-xs">
-                  My Requests
-                </Link>
-                <Link href="/carry" className="btn-ghost px-3 py-1.5 text-xs">Carry Packages</Link>
+                <Link href="/requests" className="transition hover:text-white">My Requests</Link>
+                <Link href="/carry" className="transition hover:text-white">Carry Packages</Link>
               </>
             )}
           </nav>
 
-          {isLoggedIn ? (
-            <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1.5 shadow-sm text-xs font-semibold text-primary">
-                <span>🪙</span>
-                <span>{userCredits} Credits</span>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Link href="/request" className="btn-primary px-4 py-2 text-xs">
+          <div className="flex items-center gap-3.5">
+            {isLoggedIn ? (
+              <div className="flex items-center gap-3">
+                <div className="hidden sm:flex items-center gap-2 rounded-xl border border-[rgba(255,255,255,0.08)] bg-surface px-4 py-2 text-xs font-bold text-white shadow-sm">
+                  <span>🪙</span>
+                  <span>{userCredits} Credits</span>
+                </div>
+                <Link href="/request" className="neo-btn-primary px-5 py-2.5 text-[11px] uppercase tracking-wider">
                   + New Request
                 </Link>
-                <Button variant="ghost" size="sm" onClick={handleLogout}>
+                <Button variant="ghost" size="sm" onClick={handleLogout} className="hidden sm:inline-flex text-[#cbd5e1] hover:text-white">
                   Sign out
                 </Button>
               </div>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2.5">
-              <Link href="/login" className="btn-ghost px-4 py-2 text-xs">Sign in</Link>
-              <Link href="/signup" className="btn-primary px-5 py-2.5 text-xs">Join Campus →</Link>
-            </div>
-          )}
+            ) : (
+              <div className="hidden sm:flex items-center gap-3">
+                <Link href="/login" className="btn-ghost px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#cbd5e1] hover:text-white">Sign in</Link>
+                <Link href="/signup" className="neo-btn-primary px-5 py-2.5 text-[11px] uppercase tracking-wider shadow-glow">
+                  Get Started
+                </Link>
+              </div>
+            )}
+
+            {/* Hamburger Button for mobile */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              type="button"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-[rgba(255,255,255,0.08)] bg-surface text-white md:hidden shadow-sm"
+              aria-label="Toggle menu"
+            >
+              {mobileMenuOpen ? <X className="h-5.5 w-5.5" /> : <Menu className="h-5.5 w-5.5" />}
+            </button>
+          </div>
         </div>
+
+        {/* Mobile Navigation Drawer */}
+        {mobileMenuTransition((style, isOpen) =>
+          isOpen ? (
+            <animated.div
+              style={style}
+              className="border-b border-[rgba(255,255,255,0.08)] bg-[#05070b]/95 backdrop-blur-md px-6 py-6 md:hidden overflow-hidden"
+            >
+              <nav className="flex flex-col gap-4 text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">
+                <a href="#how-it-works" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">How It Works</a>
+                <a href="#features" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">Features</a>
+                <a href="#calculator" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">For Campus</a>
+                <a href="#faqs" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">FAQs</a>
+                {isLoggedIn ? (
+                  <>
+                    <Link href="/requests" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">My Requests</Link>
+                    <Link href="/carry" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">Carry Packages</Link>
+                    <div className="flex items-center gap-2 py-2 text-xs font-bold text-white">
+                      <span>🪙 Balance:</span>
+                      <span>{userCredits} Credits</span>
+                    </div>
+                    <Button variant="secondary" size="sm" onClick={() => { handleLogout(); setMobileMenuOpen(false); }} className="w-full mt-2 border-[rgba(255,255,255,0.08)]">
+                      Sign out
+                    </Button>
+                  </>
+                ) : (
+                  <div className="flex flex-col gap-2.5 pt-2">
+                    <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="neo-btn-secondary py-3 text-center text-xs border-[rgba(255,255,255,0.08)]">
+                      Sign in
+                    </Link>
+                    <Link href="/signup" onClick={() => setMobileMenuOpen(false)} className="neo-btn-primary py-3 text-center text-xs">
+                      Get Started
+                    </Link>
+                  </div>
+                )}
+              </nav>
+            </animated.div>
+          ) : null
+        )}
       </header>
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden pt-12 pb-20 md:pt-16 md:pb-28">
-        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[350px] bg-gradient-to-tr from-accent/15 to-amber/10 blur-[100px] pointer-events-none rounded-full" />
-        <div className="relative mx-auto max-w-7xl px-5 sm:px-8">
-          <div className="grid items-center gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:gap-14">
-            {/* Left Content */}
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3.5 py-1.5 text-xs font-semibold text-primary shadow-sm">
-                <span className="h-2 w-2 rounded-full bg-accent animate-pulse" />
-                <span>The campus parcel peer-network</span>
+      <section className="relative pt-16 pb-20 md:pt-24 md:pb-28">
+        <div className="mx-auto max-w-7xl px-6 lg:px-8">
+          <div className="grid gap-12 lg:grid-cols-12 lg:items-center">
+            {/* Hero Left */}
+            <animated.div style={heroFadeSpring} className="lg:col-span-7 space-y-6">
+              {/* Green status badge */}
+              <div className="inline-flex items-center gap-2.5 rounded-full border border-[#22c55e]/20 bg-[#22c55e]/6 px-4 py-2 text-[10px] font-extrabold uppercase tracking-widest text-[#22c55e] shadow-sm">
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#22c55e] opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-[#22c55e]" />
+                </span>
+                <span>Trusted by 2000+ students across campus</span>
               </div>
 
-              <h1 className="mt-6 font-display text-4xl font-extrabold tracking-tight text-primary-hover sm:text-5xl lg:text-6xl leading-[1.08]">
-                Stop walking 20 minutes to the gate for small packages.
-              </h1>
+              {/* Giant Headline */}
+              <div className="space-y-2">
+                <h1 className="font-display text-5xl font-extrabold tracking-tighter text-white sm:text-6xl xl:text-[5.5rem] leading-[1.03]">
+                  Packages move.
+                </h1>
+                <h1 className="font-display text-5xl font-extrabold tracking-tighter text-[#2563eb] sm:text-6xl xl:text-[5.5rem] leading-[1.03] drop-shadow-[0_0_25px_rgba(37,99,235,0.25)]">
+                  You focus.
+                </h1>
+              </div>
 
-              <p className="mt-6 max-w-xl text-base leading-relaxed text-muted sm:text-lg">
-                Need your Amazon box or Swiggy parcel brought to your hostel?
-                Connect with verified peers already heading back from the gate.
-                Fast delivery, zero courier hassles, secured with 6-digit OTP.
+              {/* Description */}
+              <p className="max-w-xl text-base leading-relaxed text-[#cbd5e1] font-normal sm:text-lg">
+                The fastest and safest way to send, carry, and receive packages on campus.
               </p>
 
-              {/* Action Buttons */}
-              <div className="mt-8 flex flex-col gap-3.5 sm:flex-row">
-                <Link href="/request" className="inline-flex items-center justify-center rounded-xl btn-primary px-6 py-4 text-sm shadow-xl hover:scale-[1.02] active:scale-[0.98]">
-                  <span>Request a Gate Pickup</span>
-                  <span className="ml-2">📦 →</span>
+              {/* CTA Buttons */}
+              <div className="pt-2 flex flex-col sm:flex-row gap-4 max-w-md">
+                <Link href={isLoggedIn ? "/request" : "/signup"} className="neo-btn-primary px-8 py-4 text-xs font-extrabold uppercase tracking-widest shadow-glow">
+                  Send a Package
                 </Link>
-
-                <Link href="/carry" className="inline-flex items-center justify-center rounded-xl btn-secondary px-6 py-4 text-sm shadow-xs hover:scale-[1.02] active:scale-[0.98]">
-                  <span>Carry on Your Way (Earn 🪙)</span>
+                <Link href="/carry" className="neo-btn-secondary px-8 py-4 text-xs font-extrabold uppercase tracking-widest border-[rgba(255,255,255,0.08)] bg-transparent hover:bg-white/5">
+                  Become a Carrier
                 </Link>
               </div>
+            </animated.div>
 
-              {/* Security Pill Indicators */}
-              <div className="mt-8 flex flex-wrap items-center gap-y-2 gap-x-6 text-xs font-semibold text-muted">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-accent">✓</span>
-                  <span>100% Verified Student IDs</span>
+            {/* Hero Right: 3D Illustration */}
+            <div className="lg:col-span-5 flex justify-center relative">
+              {/* Blur backdrop behind illustration */}
+              <div className="absolute top-[20%] left-[20%] w-[250px] h-[250px] rounded-full bg-[#2563eb]/20 blur-[80px] pointer-events-none" />
+              <HeroIllustration />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Statistics Section */}
+      <section className="relative py-12 border-t border-[rgba(255,255,255,0.08)] bg-[#05070b]/60">
+        <div className="mx-auto max-w-7xl px-6 lg:px-8">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <StatCard icon={<User className="h-5 w-5 text-[#2563eb]" />} number={realStats.activeStudents} label="Active Students" />
+            <StatCard icon={<Package className="h-5 w-5 text-[#2563eb]" />} number={realStats.deliveredPackages} label="Delivered Packages" />
+            <StatCard icon={<Percent className="h-5 w-5 text-[#2563eb]" />} number={realStats.successRate} label="Success Rate" />
+            <StatCard icon={<Clock className="h-5 w-5 text-[#2563eb]" />} number={realStats.support} label="Support" />
+          </div>
+        </div>
+      </section>
+
+      {/* How UniFetch Works */}
+      <section id="how-it-works" className="relative py-24 border-t border-[rgba(255,255,255,0.08)]">
+        <div className="mx-auto max-w-7xl px-6 lg:px-8 relative z-10">
+          <div className="text-center space-y-3">
+            <h2 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-white">
+              How UniFetch Works
+            </h2>
+            <p className="text-xs font-bold uppercase tracking-widest text-[#2563eb] font-display">
+              Simple. Fast. Reliable.
+            </p>
+          </div>
+
+          <div className="mt-16 grid gap-10 lg:grid-cols-3 relative">
+            {/* Connecting line for Desktop layout */}
+            <div className="hidden lg:block absolute top-[60px] left-[15%] right-[15%] h-[1px] bg-gradient-to-r from-transparent via-[rgba(37,99,235,0.25)] to-transparent z-0" />
+
+            {stepsTrail.map((style, idx) => {
+              if (idx === 0) {
+                return (
+                  <animated.div style={style} key={idx} className="relative z-10 flex flex-col items-center text-center p-6 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)] rounded-[2rem] hover:border-[#2563eb]/20 transition-colors">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#05070b] border border-[#2563eb]/30 text-white font-display text-sm font-bold shadow-glow mb-6">
+                      1
+                    </div>
+                    <div className="h-10 w-10 flex items-center justify-center bg-[#2563eb]/10 rounded-xl mb-4 text-[#2563eb]">
+                      <Package className="h-5 w-5" />
+                    </div>
+                    <h3 className="font-display text-lg font-bold text-white">Create Request</h3>
+                    <p className="mt-3 text-xs leading-relaxed text-[#cbd5e1] font-medium">
+                      Add package details, pick-up and drop locations.
+                    </p>
+                  </animated.div>
+                );
+              }
+              if (idx === 1) {
+                return (
+                  <animated.div style={style} key={idx} className="relative z-10 flex flex-col items-center text-center p-6 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)] rounded-[2rem] hover:border-[#2563eb]/20 transition-colors">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#05070b] border border-[#2563eb]/30 text-white font-display text-sm font-bold shadow-glow mb-6">
+                      2
+                    </div>
+                    <div className="h-10 w-10 flex items-center justify-center bg-[#2563eb]/10 rounded-xl mb-4 text-[#2563eb]">
+                      <Truck className="h-5 w-5" />
+                    </div>
+                    <h3 className="font-display text-lg font-bold text-white">Someone Carries</h3>
+                    <p className="mt-3 text-xs leading-relaxed text-[#cbd5e1] font-medium">
+                      A trusted student picks it up on their way.
+                    </p>
+                  </animated.div>
+                );
+              }
+              return (
+                <animated.div style={style} key={idx} className="relative z-10 flex flex-col items-center text-center p-6 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)] rounded-[2rem] hover:border-[#2563eb]/20 transition-colors">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[#05070b] border border-[#2563eb]/30 text-white font-display text-sm font-bold shadow-glow mb-6">
+                    3
+                  </div>
+                  <div className="h-10 w-10 flex items-center justify-center bg-[#2563eb]/10 rounded-xl mb-4 text-[#2563eb]">
+                    <ThumbsUp className="h-5 w-5" />
+                  </div>
+                  <h3 className="font-display text-lg font-bold text-white">You Receive</h3>
+                  <p className="mt-3 text-xs leading-relaxed text-[#cbd5e1] font-medium">
+                    Get your package safely at your destination.
+                  </p>
+                </animated.div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Live Activity Ticker */}
+      <section className="border-y border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.01)] py-4 overflow-hidden relative">
+        <div className="mx-auto max-w-7xl px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
+          {/* Label */}
+          <div className="flex items-center gap-2.5 shrink-0 bg-[#05070b] border border-[rgba(255,255,255,0.08)] px-4 py-1.5 rounded-full text-xs font-bold text-white relative z-10">
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#22c55e] opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-[#22c55e]" />
+            </span>
+            <span className="uppercase tracking-widest font-display text-[9px] text-[#cbd5e1]">Live Activity</span>
+          </div>
+
+          {/* Marquee Ticker */}
+          <div className="flex-1 w-full overflow-hidden relative select-none">
+            <div className="flex animate-marquee gap-8">
+              {tickerList.concat(tickerList).map((text, idx) => (
+                <div key={idx} className="flex items-center gap-2 font-display text-xs font-bold text-[#cbd5e1] uppercase tracking-wider shrink-0">
+                  <span>{text}</span>
+                  <span className="h-1 w-1 bg-[#2563eb] rounded-full mx-4" />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-accent">✓</span>
-                  <span>Tamper-Proof OTP Handshake</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section id="features" className="relative py-24">
+        <div className="mx-auto max-w-7xl px-6 lg:px-8 relative z-10">
+          <div className="text-center space-y-3 mb-16">
+            <h2 className="font-display text-4xl font-extrabold tracking-tight sm:text-5xl text-white">
+              Everything you need, built for campus
+            </h2>
+            <p className="max-w-xl mx-auto text-sm text-[#cbd5e1] font-semibold">
+              Move parcels security-verified, earn rewards, and secure drop-offs without gate delays.
+            </p>
+          </div>
+
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <FeatureCard
+              icon={<Shield className="h-6 w-6 text-[#2563eb]" />}
+              title="Secure & Verified"
+              description="All users are verified with active student credentials for a safe experience."
+            />
+            <FeatureCard
+              icon={<Navigation className="h-6 w-6 text-[#2563eb]" />}
+              title="Live Tracking"
+              description="Real-time status updates and routing tracking for complete peace of mind."
+            />
+            <FeatureCard
+              icon={<Award className="h-6 w-6 text-[#2563eb]" />}
+              title="Earn Rewards"
+              description="Earn UniCredits on walks you're already taking and spend them on free fetches."
+            />
+            <FeatureCard
+              icon={<MessageSquare className="h-6 w-6 text-[#2563eb]" />}
+              title="24/7 Support"
+              description="We're here to help anytime, anywhere to resolve any delivery issues."
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Product Showcase / Why Choose UniFetch */}
+      <section className="relative py-24 border-t border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.01)]">
+        <div className="mx-auto max-w-7xl px-6 lg:px-8">
+          <div className="grid gap-16 lg:grid-cols-12 lg:items-center">
+            
+            {/* Showcase Left: Interactive phone frame & radar preview */}
+            <div className="lg:col-span-6 flex flex-col items-center">
+              {/* Category tabs */}
+              <div className="flex gap-2.5 p-1 rounded-2xl bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.08)] mb-6 w-full max-w-[420px]">
+                {mockPreviews.map((mock, idx) => (
+                  <button
+                    key={mock.id}
+                    onClick={() => setSelectedPreview(idx)}
+                    type="button"
+                    className={`flex-1 text-center py-2.5 rounded-xl text-[10px] uppercase font-bold tracking-wider transition-all duration-200 ${
+                      selectedPreview === idx
+                        ? "bg-[#2563eb] text-white shadow-glow"
+                        : "text-[#cbd5e1] hover:text-white"
+                    }`}
+                  >
+                    {mock.label.split(" ")[1]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Glowing Mobile Frame Mock-up */}
+              <div className="relative w-full max-w-[340px] aspect-[9/18.5] rounded-[3rem] border-8 border-[#1e293b] bg-[#05070b] shadow-2xl overflow-hidden p-4">
+                {/* Speaker Grill */}
+                <div className="absolute top-2.5 left-1/2 -translate-x-1/2 w-20 h-4 rounded-full bg-[#1e293b] flex items-center justify-center gap-1 z-20">
+                  <div className="w-10 h-1 bg-black rounded-full" />
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-accent">✓</span>
-                  <span>Zero Delivery Charges</span>
+
+                {/* Simulated Screen */}
+                <div className="relative h-full w-full rounded-[2rem] bg-[#05070b] overflow-hidden flex flex-col justify-between pt-6">
+                  {radarTransition((style, index) => {
+                    const preview = mockPreviews[index];
+                    return (
+                      <animated.div style={style} className="absolute inset-0 p-4 flex flex-col justify-between">
+                        {/* Map Header */}
+                        <div className="flex items-center justify-between border-b border-[rgba(255,255,255,0.06)] pb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="h-1.5 w-1.5 rounded-full bg-[#22c55e]" />
+                            <span className="text-[10px] uppercase font-extrabold tracking-widest text-[#cbd5e1]">Live tracking</span>
+                          </div>
+                          <span className="text-[10px] font-bold text-[#2563eb]">{preview.credits} credits</span>
+                        </div>
+
+                        {/* Interactive path visual */}
+                        <div className="flex-1 my-4 bg-[#0a0f18] rounded-2xl relative border border-[rgba(255,255,255,0.04)] overflow-hidden">
+                          {/* Dotted Map background */}
+                          <div className="absolute inset-0 opacity-10 bg-[radial-gradient(#ffffff_1.5px,transparent_1.5px)] bg-[size:12px_12px]" />
+                          
+                          {/* Map path SVG */}
+                          <svg className="absolute inset-0 w-full h-full" viewBox="0 0 280 200">
+                            <path d={preview.pathCoords} fill="none" stroke="#2563eb" strokeWidth="2.5" strokeDasharray="4 4" opacity="0.8" />
+                            
+                            {/* Point A (Pickup) */}
+                            <circle cx={preview.dotACoords.x} cy={preview.dotACoords.y} r="6" fill="#2563eb" className="animate-pulse" />
+                            <circle cx={preview.dotACoords.x} cy={preview.dotACoords.y} r="2" fill="#ffffff" />
+                            
+                            {/* Point B (Dropoff) */}
+                            <circle cx={preview.dotBCoords.x} cy={preview.dotBCoords.y} r="6" fill="#22c55e" className="animate-pulse" />
+                            <circle cx={preview.dotBCoords.x} cy={preview.dotBCoords.y} r="2" fill="#ffffff" />
+
+                            {/* Carrier dot moving */}
+                            <circle cx={preview.dotCarrierCoords.x} cy={preview.dotCarrierCoords.y} r="7" fill="#3b82f6" />
+                            <circle cx={preview.dotCarrierCoords.x} cy={preview.dotCarrierCoords.y} r="3.5" fill="#ffffff" />
+                          </svg>
+
+                          <div className="absolute bottom-2.5 left-2.5 right-2.5 p-2.5 rounded-xl bg-[rgba(5,7,11,0.9)] border border-[rgba(255,255,255,0.06)] text-[9px] space-y-1">
+                            <p className="font-bold text-white">From: {preview.pickup}</p>
+                            <p className="font-semibold text-[#cbd5e1]">To: {preview.dropoff}</p>
+                          </div>
+                        </div>
+
+                        {/* Tracker ETA Details Card */}
+                        <div className="p-3 bg-[rgba(255,255,255,0.04)] border border-[rgba(255,255,255,0.08)] rounded-2xl space-y-2">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="font-bold text-white">{preview.carrier} ({preview.branch})</span>
+                            <span className="font-extrabold text-[#2563eb]">{preview.eta}</span>
+                          </div>
+                          
+                          <div className="h-1.5 w-full bg-[rgba(255,255,255,0.08)] rounded-full overflow-hidden">
+                            <animated.div style={progressBarSpring} className="h-full bg-[#2563eb]" />
+                          </div>
+
+                          <div className="flex items-center justify-between text-[8px] font-extrabold text-[#cbd5e1] uppercase">
+                            <span>Status: {preview.status}</span>
+                            <span>{preview.progress}%</span>
+                          </div>
+                        </div>
+
+                        {/* OTP Cryptographic handshake code */}
+                        <div className="mt-3 py-2 px-3 border border-dashed border-[#2563eb]/30 bg-[#2563eb]/6 rounded-xl flex items-center justify-between text-[10px]">
+                          <span className="text-[#cbd5e1] font-semibold">Verification Handshake</span>
+                          <span className="font-mono tracking-widest text-[#2563eb] font-bold">*** 421</span>
+                        </div>
+                      </animated.div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
 
-            {/* Right Live Interactive Simulator Card */}
-            <div>
-              <Card className="p-6 shadow-[var(--shadow-lift)] sm:p-7">
-                <div className="flex items-center justify-between border-b border-border pb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-3 w-3 items-center justify-center rounded-full bg-accent">
-                      <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" />
-                    </span>
-                    <span className="eyebrow">Live Pickup Radar</span>
-                  </div>
-                  <Badge tone="success" className="bg-accent-tint border-accent/30 text-accent-strong">
-                    Verified Peer Matched
-                  </Badge>
+            {/* Showcase Right: Why Choose UniFetch + Semester Savings Calculator */}
+            <div className="lg:col-span-6 space-y-8">
+              <div className="space-y-4">
+                <h2 className="font-display text-4xl font-extrabold tracking-tight text-white">
+                  Why students love UniFetch
+                </h2>
+                
+                <div className="grid gap-4.5 pt-2">
+                  <BulletCheck text="Fast delivery by fellow students walking identical routes." />
+                  <BulletCheck text="Affordable and transparent pricing using credits." />
+                  <BulletCheck text="Safe, reliable, and secured by OTP handshake confirmations." />
+                  <BulletCheck text="Built for students, by students, to save time." />
+                </div>
+              </div>
+
+              {/* Savings Calculator integrated directly inside */}
+              <div className="p-6 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)] rounded-[2rem] space-y-5">
+                <div>
+                  <h4 className="font-display text-md font-bold text-white">Semester Savings Calculator</h4>
+                  <p className="text-[11px] text-[#cbd5e1] mt-1">Select the number of packages or meals you get at the gate weekly:</p>
                 </div>
 
-                {/* Package Type Switcher Tabs */}
-                <div className="mt-4 flex gap-2">
-                  {mockPreviews.map((p, idx) => (
+                <div className="flex gap-2.5">
+                  {[1, 2, 3, 5, 8].map((val) => (
                     <button
-                      key={p.id}
+                      key={val}
+                      onClick={() => setOrdersPerWeek(val)}
                       type="button"
-                      onClick={() => setSelectedPreview(idx)}
-                      className={`flex-1 rounded-xl py-2 px-2 text-center text-xs font-bold transition ${
-                        selectedPreview === idx
-                          ? "btn-primary text-white shadow-xs"
-                          : "bg-surface-soft text-muted hover:bg-surface hover:text-primary"
+                      className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
+                        ordersPerWeek === val
+                          ? "bg-[#2563eb] text-white"
+                          : "bg-transparent text-[#cbd5e1] border border-[rgba(255,255,255,0.08)] hover:border-[#2563eb]/45"
                       }`}
                     >
-                      {p.label.split(" ")[0]} {p.label.split(" ")[1]}
+                      {val} / wk
                     </button>
                   ))}
                 </div>
 
-                {/* Active Simulated Order Details */}
-                <div className="mt-6 rounded-2xl border border-border bg-surface-soft p-5">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted">Item Description</p>
-                      <h4 className="mt-1 font-display text-lg font-bold text-primary-hover">{activeMock.item}</h4>
-                    </div>
-                    <Badge tone="warning" className="bg-amber-tint border-amber/30 text-amber">
-                      {activeMock.credits} Credits
-                    </Badge>
+                <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 pt-2">
+                  <div className="p-3.5 bg-[#2563eb]/6 border border-[#2563eb]/15 rounded-2xl text-center">
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-[#2563eb]">Steps Saved</p>
+                    <p className="text-xl font-extrabold text-white mt-1">~{stepsSaved.toLocaleString()}</p>
                   </div>
-
-                  {/* Route Visual */}
-                  <div className="mt-4 space-y-2 text-xs text-muted">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-bold text-white">A</span>
-                      <span><strong>Pickup:</strong> {activeMock.pickup}</span>
-                    </div>
-                    <div className="ml-2.5 h-3 w-0.5 bg-border" />
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-5 w-5 items-center justify-center rounded-full bg-accent text-[10px] font-bold text-white">B</span>
-                      <span><strong>Dropoff:</strong> {activeMock.dropoff}</span>
-                    </div>
+                  <div className="p-3.5 bg-[#2563eb]/6 border border-[#2563eb]/15 rounded-2xl text-center">
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-[#2563eb]">Time Saved</p>
+                    <p className="text-xl font-extrabold text-white mt-1">~{hoursSaved} Hours</p>
                   </div>
-
-                  {/* Carrier Information */}
-                  <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary font-bold text-white text-sm">
-                        {activeMock.carrier.charAt(0)}
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-primary-hover">{activeMock.carrier} • {activeMock.branch}</p>
-                        <p className="text-[11px] text-muted">{activeMock.rating}</p>
-                      </div>
-                    </div>
-                    <span className="text-xs font-bold text-primary">{activeMock.eta}</span>
-                  </div>
-
-                  {/* Progress Bar */}
-                  <div className="mt-4">
-                    <div className="flex justify-between text-[11px] font-semibold text-muted mb-1.5">
-                      <span>Status: {activeMock.status}</span>
-                      <span>{activeMock.progress}%</span>
-                    </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-border-strong">
-                      <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${activeMock.progress}%` }} />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex items-center justify-between rounded-xl bg-accent-tint px-4 py-2.5 text-xs text-primary">
-                  <span className="font-semibold">🔒 Security code required for handoff</span>
-                  <span className="font-mono font-bold tracking-widest bg-surface px-2 py-0.5 rounded border border-accent/30">*** 592</span>
-                </div>
-              </Card>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* The Gate Problem: Why Campus Erranding is Broken */}
-      <section className="border-t border-border bg-surface py-20">
-        <div className="mx-auto max-w-7xl px-5 sm:px-8">
-          <div className="mx-auto max-w-2xl text-center">
-            <span className="text-xs font-bold uppercase tracking-widest text-accent">The Campus Errand Dilemma</span>
-            <h2 className="mt-3 font-display text-3xl font-bold tracking-tight text-primary-hover sm:text-4xl">
-              Why walking to the main gate 4 times a week is absurd.
-            </h2>
-            <p className="mt-4 text-base text-muted">E-commerce couriers cannot enter campus gates. Students spend hours every semester making the same exhausting round trips.</p>
-          </div>
-
-          <div className="mt-14 grid gap-8 md:grid-cols-2">
-            {/* The Old Frustrating Way */}
-            <Card className="border-danger/30 bg-danger-tint p-8">
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-danger/10 text-lg">❌</span>
-                <h3 className="font-display text-xl font-bold text-danger">The Old Way (Gate Nightmare)</h3>
-              </div>
-
-              <ul className="mt-6 space-y-4 text-sm text-danger">
-                <li className="flex items-start gap-3">
-                  <span>•</span>
-                  <span><strong>Delivery arrives mid-lecture:</strong> Delivery guy calls 3 times while you are presenting or taking notes.</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span>•</span>
-                  <span><strong>20–30 minute round trip:</strong> Walking across campus in scorching heat, rain, or before dinner.</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span>•</span>
-                  <span><strong>Parcels piling up at guard desk:</strong> Boxes getting misplaced or buried under dozens of deliveries.</span>
-                </li>
-              </ul>
-            </Card>
-
-            {/* The UniFetch Peer Network Way */}
-            <Card className="border-success/30 bg-success-tint p-8">
-              <div className="flex items-center gap-3">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-success/10 text-lg">✨</span>
-                <h3 className="font-display text-xl font-bold text-success">With UniFetch (Peer Delivery)</h3>
-              </div>
-
-              <ul className="mt-6 space-y-4 text-sm text-success">
-                <li className="flex items-start gap-3">
-                  <span>•</span>
-                  <span><strong>Zero detours needed:</strong> A student who was already at the gate cafe grabs your parcel on their walk back.</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span>•</span>
-                  <span><strong>Delivered to your hostel lobby:</strong> Receive your Amazon parcel or Swiggy meal right where you live.</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span>•</span>
-                  <span><strong>Win-win credit economy:</strong> Carriers earn points/credits, requesters save 20 minutes of walking.</span>
-                </li>
-              </ul>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* Interactive Step & Time Calculator */}
-      <section id="calculator" className="border-t border-border bg-surface-soft py-20">
-        <div className="mx-auto max-w-4xl px-5 sm:px-8 text-center">
-          <span className="text-xs font-bold uppercase tracking-widest text-primary">Interactive Campus Savings Calculator</span>
-          <h2 className="mt-3 font-display text-3xl font-bold text-primary-hover sm:text-4xl">
-            How much walking will UniFetch save you this semester?
-          </h2>
-
-          <Card className="mt-10 p-8 shadow-[var(--shadow-card)]">
-            <label htmlFor="orders" className="block text-sm font-bold text-muted">How many parcels / food deliveries do you get per week?</label>
-
-            {/* Slider / Preset Buttons */}
-            <div className="mt-6 flex justify-center gap-3">
-              {[1, 2, 3, 5, 8].map((num) => (
-                <button
-                  key={num}
-                  type="button"
-                  onClick={() => setOrdersPerWeek(num)}
-                  className={`h-12 w-14 rounded-2xl text-sm font-bold transition ${
-                    ordersPerWeek === num
-                      ? "btn-primary shadow-md scale-105"
-                      : "btn-secondary"
-                  }`}
-                >
-                  {num}/wk
-                </button>
-              ))}
-            </div>
-
-            <div className="mt-10 grid gap-6 sm:grid-cols-3 border-t border-border pt-8">
-              <Card className="bg-accent-tint border-success/30 p-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-success">Steps Avoided</p>
-                <p className="mt-2 font-display text-3xl font-extrabold text-primary">~{stepsSaved.toLocaleString()}</p>
-                <p className="mt-1 text-xs text-muted">Every single semester</p>
-              </Card>
-
-              <Card className="bg-accent-tint border-success/30 p-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-success">Study & Free Time Saved</p>
-                <p className="mt-2 font-display text-3xl font-extrabold text-primary">~{hoursSaved} Hours</p>
-                <p className="mt-1 text-xs text-muted">No gate walking in heat/rain</p>
-              </Card>
-
-              <Card className="bg-amber-tint border-amber/30 p-5">
-                <p className="text-xs font-bold uppercase tracking-wider text-amber">Carrier Earnings Potential</p>
-                <p className="mt-2 font-display text-3xl font-extrabold text-amber">+{ordersPerWeek * 30 * 16} 🪙</p>
-                <p className="mt-1 text-xs text-amber">If you carry for friends on walks</p>
-              </Card>
-            </div>
-
-            <div className="mt-8">
-              <Link href="/signup" className="inline-flex items-center justify-center rounded-xl btn-primary px-7 py-3.5 text-sm shadow-lg">
-                Claim Your 100 Free Starter Credits →
-              </Link>
-            </div>
-          </Card>
-        </div>
-      </section>
-
-      {/* How It Works (3 Steps) */}
-      <section id="how-it-works" className="border-t border-border bg-primary-hover py-20 text-white">
-        <div className="mx-auto max-w-7xl px-5 sm:px-8">
-          <div className="max-w-xl">
-            <span className="text-xs font-bold uppercase tracking-widest text-accent">Simple 3-Step Flow</span>
-            <h2 className="mt-3 font-display text-3xl font-bold tracking-tight sm:text-4xl">
-              How packages move effortlessly across your campus.
-            </h2>
-          </div>
-
-          <div className="mt-12 grid gap-8 md:grid-cols-3">
-            <Card className="border-white/15 bg-white/[0.05] p-7 transition hover:bg-white/[0.08]">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent font-display text-lg font-bold text-primary-hover">01</span>
-              <h3 className="mt-6 font-display text-xl font-bold">1. Post in 10 Seconds</h3>
-              <p className="mt-3 text-sm leading-relaxed text-[#bad4c8]">
-                Type what package is waiting at the gate (Amazon parcel, Swiggy, stationery) and select your hostel block.
-              </p>
-            </Card>
-
-            <Card className="border-white/15 bg-white/[0.05] p-7 transition hover:bg-white/[0.08]">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent font-display text-lg font-bold text-primary-hover">02</span>
-              <h3 className="mt-6 font-display text-xl font-bold">2. A Nearby Student Claims It</h3>
-              <p className="mt-3 text-sm leading-relaxed text-[#bad4c8]">
-                A verified peer who is already at the main gate claims your delivery and picks it up from the security counter.
-              </p>
-            </Card>
-
-            <Card className="border-white/15 bg-white/[0.05] p-7 transition hover:bg-white/[0.08]">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-accent font-display text-lg font-bold text-primary-hover">03</span>
-              <h3 className="mt-6 font-display text-xl font-bold">3. OTP Secured Handoff</h3>
-              <p className="mt-3 text-sm leading-relaxed text-[#bad4c8]">
-                They bring it straight to your hostel lobby. You check your parcel, give them your unique 6-digit OTP, and they receive credits.
-              </p>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* Safety & Trust Section */}
-      <section id="trust" className="border-t border-border bg-surface py-20">
-        <div className="mx-auto max-w-7xl px-5 sm:px-8">
-          <div className="grid items-center gap-12 lg:grid-cols-2">
-            <div>
-              <span className="text-xs font-bold uppercase tracking-widest text-accent">Safety First Architecture</span>
-              <h2 className="mt-3 font-display text-3xl font-bold tracking-tight text-primary-hover sm:text-4xl">
-                Built strictly for students. Protected by OTP cryptography.
-              </h2>
-              <p className="mt-4 text-base leading-relaxed text-muted">
-                We know your packages contain expensive electronics, books, and personal items. UniFetch was engineered around verifiable campus trust.
-              </p>
-
-              <div className="mt-8 space-y-5">
-                <div className="flex gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-tint text-lg text-primary">🪪</div>
-                  <div>
-                    <h4 className="font-bold text-primary-hover">Strict Student ID Verification</h4>
-                    <p className="mt-1 text-xs leading-relaxed text-muted">Every student must submit a verified college ID card before they can request or carry a single parcel.</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-tint text-lg text-primary">🔑</div>
-                  <div>
-                    <h4 className="font-bold text-primary-hover">6-Digit OTP Delivery Handshake</h4>
-                    <p className="mt-1 text-xs leading-relaxed text-muted">Carriers cannot fake a delivery. The database will only mark an order complete when your unique OTP is entered.</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-4">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent-tint text-lg text-primary">⭐</div>
-                  <div>
-                    <h4 className="font-bold text-primary-hover">Community Peer Reputation</h4>
-                    <p className="mt-1 text-xs leading-relaxed text-muted">Ratings, completed delivery stats, and student badges keep our network reliable, punctual, and safe.</p>
+                  <div className="p-3.5 bg-[#eab308]/6 border border-[#eab308]/15 rounded-2xl text-center col-span-2 sm:col-span-1">
+                    <p className="text-[9px] font-bold uppercase tracking-wider text-[#eab308]">Credits Earned</p>
+                    <p className="text-xl font-extrabold text-[#eab308] mt-1">+{ordersPerWeek * 30 * 16} 🪙</p>
                   </div>
                 </div>
               </div>
+
+              {/* Action Button */}
+              <div className="pt-2">
+                <Link href={isLoggedIn ? "/request" : "/signup"} className="neo-btn-primary px-8 py-4 text-xs font-extrabold uppercase tracking-widest shadow-glow">
+                  Join UniFetch Today
+                </Link>
+              </div>
+
             </div>
 
-            {/* OTP Security Visual Graphic */}
-            <Card className="bg-surface-soft p-8 text-center shadow-[var(--shadow-card)]">
-              <span className="text-4xl">🔐</span>
-              <h3 className="mt-4 font-display text-xl font-bold text-primary-hover">How the OTP Handshake Works</h3>
-              <p className="mt-2 text-xs text-muted">Only release this code when the package is physically in your hands.</p>
-
-              <div className="mt-6 inline-flex items-center gap-3 rounded-2xl border-2 border-dashed border-primary/40 bg-surface p-4 shadow-xs">
-                <span className="font-mono text-2xl font-extrabold tracking-[0.3em] text-primary">4 8 2 9 1 0</span>
-                <Badge tone="success" className="bg-accent-tint border-accent/30 text-accent-strong">Active OTP</Badge>
-              </div>
-
-              <div className="mt-6 rounded-2xl bg-accent-tint p-4 text-left text-xs text-primary">
-                <p className="font-bold">✓ Carrier enters code on their phone</p>
-                <p className="mt-1 text-muted">Database verifies cryptographic match instantly ➔ Marks order Delivered ➔ Credits transferred.</p>
-              </div>
-            </Card>
           </div>
         </div>
       </section>
 
       {/* FAQs Section */}
-      <section id="faqs" className="border-t border-border bg-surface-soft py-20">
-        <div className="mx-auto max-w-4xl px-5 sm:px-8">
-          <div className="text-center">
-            <span className="text-xs font-bold uppercase tracking-widest text-primary">Got Questions?</span>
-            <h2 className="mt-3 font-display text-3xl font-bold text-primary-hover">Frequently Asked Questions</h2>
+      <section id="faqs" className="relative py-24 border-t border-[rgba(255,255,255,0.08)]">
+        <div className="mx-auto max-w-3xl px-6 lg:px-8">
+          <div className="text-center space-y-3 mb-16">
+            <h2 className="font-display text-4xl font-extrabold text-white">Frequently Asked Questions</h2>
+            <p className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Help center</p>
           </div>
 
-          <div className="mt-12 space-y-4">
+          <div className="space-y-4">
             {faqs.map((faq, idx) => (
-              <Card key={faq.q} className="overflow-hidden transition shadow-xs">
-                <button type="button" onClick={() => setOpenFaq(openFaq === idx ? null : idx)} className="flex w-full items-center justify-between p-5 text-left text-sm font-bold text-primary-hover hover:bg-surface-soft">
-                  <span>{faq.q}</span>
-                  <span className="text-base text-primary">{openFaq === idx ? "−" : "+"}</span>
-                </button>
-
-                {openFaq === idx && (
-                  <div className="border-t border-border bg-surface-soft p-5 text-xs leading-relaxed text-muted">{faq.a}</div>
-                )}
-              </Card>
+              <FaqAccordionItem
+                key={faq.q}
+                q={faq.q}
+                a={faq.a}
+                isOpen={openFaq === idx}
+                onToggle={() => setOpenFaq(openFaq === idx ? null : idx)}
+              />
             ))}
           </div>
         </div>
       </section>
 
-      {/* Big Bottom CTA Banner */}
-      <section className="px-5 pb-20 sm:px-8">
-        <div className="mx-auto max-w-7xl rounded-[2.5rem] bg-primary-hover px-6 py-16 text-center text-white sm:px-12 lg:py-20 shadow-[var(--shadow-primary)]">
-          <span className="text-xs font-bold uppercase tracking-widest text-accent">Start Saving Time Today</span>
-          <h2 className="mx-auto mt-4 max-w-2xl font-display text-3xl font-bold sm:text-5xl">
-            Never make the exhausting gate walk alone again.
-          </h2>
-          <p className="mx-auto mt-5 max-w-xl text-sm leading-relaxed text-[#bad4c8] sm:text-base">
-            Join hundreds of students in your campus who move packages better, faster, and together.
-          </p>
+      {/* Final CTA Section */}
+      <section className="px-6 py-16 sm:px-8">
+        <div className="mx-auto max-w-7xl rounded-[3rem] bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/25 via-[#0b0f19]/80 to-[#05070b]/90 border border-[rgba(255,255,255,0.08)] px-8 py-16 text-center text-white sm:px-16 lg:py-20 shadow-glow relative overflow-hidden">
+          {/* Blue lighting accent */}
+          <div className="absolute top-[30%] right-[-10%] w-[350px] h-[350px] rounded-full bg-[#2563eb]/15 blur-[90px] pointer-events-none" />
 
-          <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-            <Link href={isLoggedIn ? "/request" : "/signup"} className="inline-flex items-center justify-center rounded-xl bg-accent px-7 py-4 text-sm font-bold text-primary-hover shadow-lg transition hover:bg-accent-strong hover:scale-105 active:scale-95">
-              {isLoggedIn ? "Request a Package Now →" : "Get Started (Free 100 Credits) →"}
-            </Link>
-            <Link href="/carry" className="inline-flex items-center justify-center rounded-xl border border-white/20 bg-white/10 px-7 py-4 text-sm font-bold text-white transition hover:bg-white/15">
-              Browse Gate Pickups 🚴
-            </Link>
+          <div className="grid gap-12 lg:grid-cols-12 lg:items-center relative z-10 text-left">
+            <div className="lg:col-span-7 space-y-6">
+              <p className="text-xs font-bold uppercase tracking-widest text-[#2563eb] font-display">Get started</p>
+              <h2 className="font-display text-4xl font-extrabold sm:text-5xl leading-[1.1] text-white">
+                Send. Carry. Earn.<br />
+                Do it all with UniFetch.
+              </h2>
+              <p className="max-w-xl text-xs leading-relaxed text-[#cbd5e1] font-semibold sm:text-sm">
+                Join thousands of students who trust UniFetch for hassle-free campus deliveries.
+              </p>
+
+              <div className="pt-4 flex flex-col sm:flex-row gap-4 max-w-md">
+                <Link href={isLoggedIn ? "/request" : "/signup"} className="neo-btn-primary px-8 py-4 text-xs font-extrabold uppercase tracking-widest shadow-glow">
+                  Send a Package
+                </Link>
+                <Link href="/carry" className="neo-btn-secondary px-8 py-4 text-xs font-extrabold uppercase tracking-widest border-[rgba(255,255,255,0.08)] bg-transparent hover:bg-white/5">
+                  Become a Carrier
+                </Link>
+              </div>
+            </div>
+
+            <div className="lg:col-span-5 flex justify-center">
+              <MiniHeroIllustration />
+            </div>
           </div>
         </div>
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border bg-surface px-5 py-8 sm:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 text-xs font-medium text-muted sm:flex-row">
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-primary text-white text-[10px] font-bold">U</div>
-            <span className="font-bold text-primary-hover">UniFetch</span>
-            <span>• Built for college campuses.</span>
+      <footer className="border-t border-[rgba(255,255,255,0.08)] bg-[#05070b] px-6 py-16 lg:px-8">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid gap-10 sm:grid-cols-2 lg:grid-cols-12 pb-12 border-b border-[rgba(255,255,255,0.04)]">
+            {/* Logo/Brand column */}
+            <div className="lg:col-span-5 space-y-4">
+              <Link href="/" className="flex items-center gap-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#2563eb] text-white text-[11px] font-bold shadow-glow">
+                  <LogoMark className="h-5.5 w-5.5" />
+                </div>
+                <span className="font-bold text-white font-display text-lg tracking-tight">UniFetch</span>
+              </Link>
+              <p className="text-xs text-[#cbd5e1] max-w-xs leading-relaxed font-semibold">
+                Making campus deliveries simple, safe, and reliable by connecting peers already on the walk.
+              </p>
+            </div>
+
+            {/* Quick Links */}
+            <div className="lg:col-span-2.5 space-y-4">
+              <h5 className="font-display text-[10px] font-extrabold uppercase tracking-widest text-[#2563eb]">Quick Links</h5>
+              <div className="flex flex-col gap-2.5 text-xs text-[#cbd5e1] font-semibold">
+                <Link href="/" className="hover:text-white transition-colors">Home</Link>
+                <a href="#how-it-works" className="hover:text-white transition-colors">How It Works</a>
+                <a href="#features" className="hover:text-white transition-colors">Features</a>
+                <a href="#faqs" className="hover:text-white transition-colors">FAQs</a>
+              </div>
+            </div>
+
+            {/* For Campus */}
+            <div className="lg:col-span-2.5 space-y-4">
+              <h5 className="font-display text-[10px] font-extrabold uppercase tracking-widest text-[#2563eb]">For Campus</h5>
+              <div className="flex flex-col gap-2.5 text-xs text-[#cbd5e1] font-semibold">
+                <Link href="/requests" className="hover:text-white transition-colors">Partner with us</Link>
+                <Link href="/carry" className="hover:text-white transition-colors">Safety</Link>
+                <Link href="/" className="hover:text-white transition-colors">Guidelines</Link>
+                <a href="#faqs" className="hover:text-white transition-colors">Support</a>
+              </div>
+            </div>
+
+            {/* Contact info */}
+            <div className="lg:col-span-2 space-y-4">
+              <h5 className="font-display text-[10px] font-extrabold uppercase tracking-widest text-[#2563eb]">Contact Us</h5>
+              <div className="flex flex-col gap-2 text-xs text-[#cbd5e1] font-semibold">
+                <span>hello@unifetch.com</span>
+                <span>+91 98765-43210</span>
+                <span>Mumbai, India</span>
+              </div>
+            </div>
           </div>
-          <p>© 2026 UniFetch Inc. Packages move better together.</p>
+
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-8 text-[11px] font-bold text-[#cbd5e1]">
+            <p className="font-normal text-[#cbd5e1]">© 2026 UniFetch. All rights reserved.</p>
+            <div className="flex gap-6 uppercase tracking-wider">
+              <Link href="/" className="hover:text-white transition-colors">Privacy Policy</Link>
+              <span>|</span>
+              <Link href="/" className="hover:text-white transition-colors">Terms of Service</Link>
+            </div>
+          </div>
         </div>
       </footer>
     </main>
   );
 }
 
-function LogoMark({ className }: { className?: string }) {
+// Subcomponents helper
+
+function StatCard({ icon, number, label }: { icon: React.ReactNode; number: string; label: string }) {
   return (
-    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className={className}>
-      <path d="M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Z" />
-      <path d="m4.5 7.7 7.5 4.2 7.5-4.2M12 12v9" />
-    </svg>
+    <Card className="flex flex-col items-center text-center p-6 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.06)] rounded-[2rem] hover:border-[#2563eb]/25 transition-all duration-200">
+      <div className="h-10 w-10 flex items-center justify-center bg-[#2563eb]/8 rounded-full mb-4 shadow-sm border border-[#2563eb]/10">
+        {icon}
+      </div>
+      <span className="font-display text-3xl font-extrabold text-white tracking-tight">{number}</span>
+      <span className="mt-1 text-[10px] uppercase tracking-widest text-[#cbd5e1] font-bold">{label}</span>
+    </Card>
+  );
+}
+
+function FeatureCard({ icon, title, description }: { icon: React.ReactNode; title: string; description: string }) {
+  return (
+    <Card className="p-6 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.06)] rounded-[2rem] hover:border-[#2563eb]/30 transition-all duration-200 hover:-translate-y-1">
+      <div className="h-11 w-11 flex items-center justify-center bg-[#2563eb]/10 rounded-xl mb-6 text-[#2563eb] shadow-sm">
+        {icon}
+      </div>
+      <h3 className="font-display text-md font-bold text-white mb-2">{title}</h3>
+      <p className="text-[11px] leading-relaxed text-[#cbd5e1] font-semibold">{description}</p>
+    </Card>
+  );
+}
+
+function BulletCheck({ text }: { text: string }) {
+  return (
+    <div className="flex gap-3">
+      <div className="h-5 w-5 shrink-0 flex items-center justify-center rounded-full bg-[#2563eb]/10 border border-[#2563eb]/20 text-[#2563eb]">
+        <Check className="h-3 w-3" />
+      </div>
+      <span className="text-xs text-[#cbd5e1] font-semibold leading-relaxed">{text}</span>
+    </div>
+  );
+}
+
+function FaqAccordionItem({
+  q,
+  a,
+  isOpen,
+  onToggle,
+}: {
+  q: string;
+  a: string;
+  isOpen: boolean;
+  onToggle: () => void;
+}) {
+  const answerRef = useRef<HTMLDivElement>(null);
+  const [measuredHeight, setMeasuredHeight] = useState(0);
+
+  useEffect(() => {
+    if (answerRef.current) {
+      setMeasuredHeight(answerRef.current.scrollHeight);
+    }
+  }, [a]);
+
+  const accordionStyle = useSpring({
+    height: isOpen ? `${measuredHeight}px` : "0px",
+    opacity: isOpen ? 1 : 0,
+    config: { tension: 280, friction: 24 },
+  });
+
+  return (
+    <Card className="overflow-hidden border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.01)] transition-all duration-200 hover:border-[#2563eb]/20 rounded-2xl">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between p-5 text-left text-xs sm:text-sm font-bold text-white hover:bg-[rgba(255,255,255,0.02)]"
+      >
+        <span className="flex items-center gap-2">
+          <HelpCircle className="h-4.5 w-4.5 text-[#2563eb] shrink-0" />
+          {q}
+        </span>
+        <span className="text-base text-[#2563eb] leading-none shrink-0 ml-4">{isOpen ? "−" : "+"}</span>
+      </button>
+
+      <animated.div style={{ ...accordionStyle, overflow: "hidden" }}>
+        <div ref={answerRef} className="border-t border-[rgba(255,255,255,0.06)] bg-[#05070b]/60 p-5 text-xs leading-relaxed text-[#cbd5e1] font-medium">
+          {a}
+        </div>
+      </animated.div>
+    </Card>
+  );
+}
+
+// Detailed 3D package box illustration with spinning orbits (Hero right)
+function HeroIllustration() {
+  return (
+    <div className="w-full max-w-[420px] aspect-square relative flex items-center justify-center animate-none">
+      {/* Outer Orbit */}
+      <div className="absolute inset-0 border border-dashed border-[#2563eb]/20 rounded-full animate-spin-slow rotate-[60deg] scale-x-[0.5] scale-y-[1.2]" />
+      
+      {/* Inner Orbit */}
+      <div className="absolute w-[80%] h-[80%] border border-[rgba(37,99,235,0.35)] rounded-full animate-spin-reverse-slow rotate-[-30deg] scale-x-[1.1] scale-y-[0.4]" />
+
+      {/* Outer Orbit Icons */}
+      <div className="absolute inset-0 animate-spin-slow pointer-events-none">
+        {/* Package icon capsule */}
+        <div className="absolute top-[10%] left-[20%] h-9 w-9 flex items-center justify-center rounded-full bg-[#05070b] border border-[#2563eb]/45 shadow-glow text-[#2563eb] rotate-[25deg]">
+          <Package className="h-4 w-4" />
+        </div>
+        {/* User icon capsule */}
+        <div className="absolute bottom-[10%] right-[20%] h-9 w-9 flex items-center justify-center rounded-full bg-[#05070b] border border-[#2563eb]/45 shadow-glow text-[#2563eb]">
+          <User className="h-4 w-4" />
+        </div>
+      </div>
+
+      {/* Inner Orbit Icons */}
+      <div className="absolute w-[80%] h-[80%] animate-spin-reverse-slow pointer-events-none">
+        {/* Tracking pin capsule */}
+        <div className="absolute top-[40%] right-[-5px] h-9 w-9 flex items-center justify-center rounded-full bg-[#05070b] border border-[#2563eb]/45 shadow-glow text-[#2563eb]">
+          <MapPin className="h-4 w-4" />
+        </div>
+        {/* Navigation arrow capsule */}
+        <div className="absolute bottom-[40%] left-[-5px] h-9 w-9 flex items-center justify-center rounded-full bg-[#05070b] border border-[#2563eb]/45 shadow-glow text-[#2563eb]">
+          <Navigation className="h-4 w-4" />
+        </div>
+      </div>
+
+      {/* Center 3D Isometric Cube Drawing */}
+      <div className="relative w-[180px] h-[180px] animate-float z-10">
+        <svg viewBox="0 0 200 200" className="w-full h-full overflow-visible">
+          <defs>
+            <linearGradient id="cube-top-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="#2563eb" stopOpacity="0.8" />
+              <stop offset="100%" stopColor="#1d4ed8" stopOpacity="0.9" />
+            </linearGradient>
+            <linearGradient id="cube-left-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#0b0f19" />
+              <stop offset="100%" stopColor="#1e293b" />
+            </linearGradient>
+            <linearGradient id="cube-right-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="#1e293b" />
+              <stop offset="100%" stopColor="#0b0f19" />
+            </linearGradient>
+            <filter id="cube-shadow-blur" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="8" />
+            </filter>
+          </defs>
+
+          {/* Ellipse shadow under box */}
+          <ellipse cx="100" cy="170" rx="60" ry="18" fill="#2563eb" opacity="0.25" filter="url(#cube-shadow-blur)" />
+
+          {/* Isometric Cube polygons */}
+          {/* Top face */}
+          <polygon points="100,30 170,65 100,100 30,65" fill="url(#cube-top-grad)" stroke="#3b82f6" strokeWidth="2.5" />
+          
+          {/* Left face */}
+          <polygon points="30,65 100,100 100,170 30,135" fill="url(#cube-left-grad)" stroke="#2563eb" strokeWidth="2" strokeOpacity="0.6" />
+          
+          {/* Right face */}
+          <polygon points="100,100 170,65 170,135 100,170" fill="url(#cube-right-grad)" stroke="#2563eb" strokeWidth="2" strokeOpacity="0.6" />
+
+          {/* Wrapping Tape details */}
+          <polygon points="90,35 100,40 110,35 100,30" fill="#ffffff" opacity="0.25" />
+          <polygon points="82,40 100,49 100,100 82,91" fill="#3b82f6" opacity="0.3" />
+          <polygon points="100,49 118,40 118,91 100,100" fill="#3b82f6" opacity="0.3" />
+
+          {/* Glowing dot on top */}
+          <circle cx="100" cy="35" r="4.5" fill="#3b82f6" className="animate-pulse" />
+          
+          {/* Small shipping barcode detail on right face */}
+          <line x1="125" y1="95" x2="145" y2="85" stroke="#ffffff" strokeWidth="1.5" opacity="0.12" />
+          <line x1="125" y1="102" x2="145" y2="92" stroke="#ffffff" strokeWidth="3" opacity="0.12" />
+          <line x1="125" y1="110" x2="145" y2="100" stroke="#ffffff" strokeWidth="1.5" opacity="0.12" />
+
+          {/* Small details on left face */}
+          <path d="M 50,95 L 80,110" stroke="#2563eb" strokeWidth="2" strokeDasharray="3 3" opacity="0.5" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+// Mini illustration for Final CTA section
+function MiniHeroIllustration() {
+  return (
+    <div className="w-[180px] h-[180px] relative flex items-center justify-center">
+      {/* Outer Orbit */}
+      <div className="absolute inset-0 border border-dashed border-[#2563eb]/20 rounded-full animate-spin-slow rotate-[60deg] scale-x-[0.5] scale-y-[1.2]" />
+
+      {/* Center 3D Isometric Cube Drawing */}
+      <div className="relative w-[100px] h-[100px] animate-float z-10">
+        <svg viewBox="0 0 200 200" className="w-full h-full overflow-visible">
+          {/* Isometric Cube polygons */}
+          {/* Top face */}
+          <polygon points="100,30 170,65 100,100 30,65" fill="url(#cube-top-grad)" stroke="#3b82f6" strokeWidth="2.5" />
+          {/* Left face */}
+          <polygon points="30,65 100,100 100,170 30,135" fill="url(#cube-left-grad)" stroke="#2563eb" strokeWidth="2" strokeOpacity="0.6" />
+          {/* Right face */}
+          <polygon points="100,100 170,65 170,135 100,170" fill="url(#cube-right-grad)" stroke="#2563eb" strokeWidth="2" strokeOpacity="0.6" />
+        </svg>
+      </div>
+    </div>
   );
 }

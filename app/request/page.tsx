@@ -1,18 +1,14 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { ShieldCheck, Info, CheckCircle } from "lucide-react";
+import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
-import { Logo } from "../components/ui/Logo";
+import { SidebarShell } from "../components/SidebarShell";
 import { Button } from "../components/ui/Button";
-import { Card } from "../components/ui/Card";
 import { Field, Select } from "../components/ui/Field";
 import { Alert } from "../components/ui/Alert";
-import { Badge } from "../components/ui/Badge";
-import { EmptyState } from "../components/ui/EmptyState";
-import { PageHeader } from "../components/ui/PageHeader";
-import { StatPill } from "../components/ui/StatPill";
 
 const packageCategories = [
   { id: "amazon", label: "Amazon / Flipkart", icon: "📦", placeholder: "e.g. Noise Smartwatch box" },
@@ -56,7 +52,6 @@ export default function RequestPackagePage() {
 
   const pickupTimeRef = useRef<HTMLInputElement>(null);
 
-  // Default time helper (+1 hour). Only called from handlers/effects, never render.
   function getDefaultTime() {
     const d = new Date(Date.now() + 60 * 60 * 1000);
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
@@ -64,8 +59,6 @@ export default function RequestPackagePage() {
   }
 
   useEffect(() => {
-    // Seed the datetime-local input after mount (DOM sync — no state churn,
-    // and Date.now() stays out of render so the component stays pure).
     if (pickupTimeRef.current && !pickupTimeRef.current.value) {
       pickupTimeRef.current.value = getDefaultTime();
     }
@@ -103,8 +96,6 @@ export default function RequestPackagePage() {
 
     const fullDescription = `[${category.toUpperCase()}] ${packageDescription.trim() || packageCategories.find(c => c.id === category)?.placeholder}`;
 
-    // OTP is generated server-side inside the RPC so it never round-trips
-    // through the browser and is stored in a private table.
     const { error } = await supabase.rpc(
       "create_package_request",
       {
@@ -131,190 +122,185 @@ export default function RequestPackagePage() {
     }, 1200);
   }
 
+  const formCardSpring = useSpring({
+    from: { opacity: 0, transform: "translate3d(0, 15px, 0)" },
+    to: { opacity: 1, transform: "translate3d(0, 0, 0)" },
+    config: { tension: 320, friction: 24 },
+  });
+
   return (
-    <main className="min-h-screen bg-background px-5 py-8 text-foreground sm:px-8 sm:py-12 selection:bg-accent/20">
-      <div className="mx-auto max-w-4xl">
-        {/* Header navigation */}
-        <PageHeader
-          backHref="/"
-          backLabel="Back to UniFetch"
-          actions={
-            <Link href="/requests" className="btn-ghost px-3 py-1.5 text-xs">
-              View Active Requests
-            </Link>
-          }
-        />
+    <SidebarShell>
+      <div className="p-6 sm:p-8 lg:p-10 space-y-8">
+        
+        {/* Title area */}
+        <div className="border-b border-[rgba(255,255,255,0.08)] pb-6">
+          <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">New Delivery Job</span>
+          <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
+            Request Gate Pickup
+          </h1>
+          <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
+            Fill out the details of your package waiting at the campus gate.
+          </p>
+        </div>
 
-        <div className="mt-8 grid gap-8 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="grid gap-8 lg:grid-cols-[1.5fr_1fr] items-start">
           {/* Left Form Card */}
-          <Card className="p-6 sm:p-9">
-            <div className="flex items-center gap-2">
-              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary-tint text-sm">
-                📦
-              </span>
-              <span className="eyebrow">New Delivery Request</span>
-            </div>
-
-            <h1 className="mt-3 font-display text-3xl font-extrabold tracking-tight text-primary-hover">
-              Get your parcel from the gate
-            </h1>
-
-            <p className="mt-2 text-sm text-muted">
-              A verified student walking near the gate will bring it to your hostel lobby.
-            </p>
-
-            <form onSubmit={handleSubmit} className="mt-8 space-y-6">
-              {/* Category Picker */}
-              <div>
-                <label className="field-label">
-                  1. What kind of package is it?
-                </label>
-                <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
-                  {packageCategories.map((cat) => (
-                    <button
-                      key={cat.id}
-                      type="button"
-                      onClick={() => setCategory(cat.id)}
-                      className={`flex items-center gap-2 rounded-2xl p-3 text-left text-xs font-bold transition border ${
-                        category === cat.id
-                          ? "border-primary bg-primary-tint text-primary shadow-xs ring-2 ring-accent/20"
-                          : "border-border bg-surface-soft text-muted hover:border-border-strong"
-                      }`}
-                    >
-                      <span className="text-base">{cat.icon}</span>
-                      <span className="truncate">{cat.label}</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Package Description */}
-              <Field
-                id="packageDescription"
-                name="packageDescription"
-                type="text"
-                required
-                label="2. Brief Item Description"
-                placeholder={packageCategories.find((c) => c.id === category)?.placeholder}
-                value={packageDescription}
-                onChange={(e) => setPackageDescription(e.target.value)}
-              />
-
-              {/* Gate Pickup Location */}
-              <Select
-                id="pickupLocation"
-                label="3. Pickup Gate / Counter"
-                value={pickupLocation}
-                onChange={(e) => setPickupLocation(e.target.value)}
-              >
-                {gateLocations.map((loc) => (
-                  <option key={loc} value={loc}>
-                    {loc}
-                  </option>
-                ))}
-              </Select>
-
-              {/* Delivery Dropoff Location */}
-              <div>
-                <label
-                  htmlFor="deliveryLocation"
-                  className="field-label"
-                >
-                  4. Your Hostel / Building
-                </label>
-                <div className="grid gap-3 sm:grid-cols-[1.3fr_0.7fr]">
-                  <Select
-                    id="deliveryLocation"
-                    value={deliveryLocation}
-                    onChange={(e) => setDeliveryLocation(e.target.value)}
-                  >
-                    {hostelLocations.map((loc) => (
-                      <option key={loc} value={loc}>
-                        {loc}
-                      </option>
+          <animated.div style={formCardSpring}>
+            <div className="rounded-[2rem] border border-[rgba(255,255,255,0.08)] p-6 sm:p-8 bg-[#080d16]/40 backdrop-blur-sm">
+              <form onSubmit={handleSubmit} className="space-y-6">
+                
+                {/* Category selector */}
+                <div>
+                  <label className="field-label font-extrabold text-[10px] text-[#cbd5e1] tracking-wider uppercase mb-3">
+                    1. Select Package Category
+                  </label>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {packageCategories.map((cat) => (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        onClick={() => setCategory(cat.id)}
+                        className={`flex items-center gap-2.5 rounded-2xl p-4 text-left text-xs font-bold transition-all duration-150 border-2 ${
+                          category === cat.id
+                            ? "border-[#2563eb] bg-[#2563eb]/10 text-white shadow-glow"
+                            : "border-[rgba(255,255,255,0.08)] bg-white/5 text-[#cbd5e1] hover:border-[#2563eb]/30 hover:text-white"
+                        }`}
+                      >
+                        <span className="text-lg shrink-0">{cat.icon}</span>
+                        <span className="truncate">{cat.label}</span>
+                      </button>
                     ))}
-                  </Select>
-
-                  <Field
-                    id="roomNumber"
-                    type="text"
-                    placeholder="Room No. (e.g. 302)"
-                    value={roomNumber}
-                    onChange={(e) => setRoomNumber(e.target.value)}
-                  />
+                  </div>
                 </div>
-              </div>
 
-              {/* Pickup Time */}
-              <Field
-                id="pickupTime"
-                name="pickupTime"
-                ref={pickupTimeRef}
-                type="datetime-local"
-                label="5. Needed By (Time)"
-                onChange={(e) => setPickupTime(e.target.value)}
-              />
+                {/* Package Description */}
+                <Field
+                  id="packageDescription"
+                  name="packageDescription"
+                  type="text"
+                  required
+                  label="2. Item Description"
+                  placeholder={packageCategories.find((c) => c.id === category)?.placeholder}
+                  value={packageDescription}
+                  onChange={(e) => setPackageDescription(e.target.value)}
+                />
 
-              {/* Error and Success notifications */}
-              <Alert tone="error" className="">{errorMessage}</Alert>
-              <Alert tone="success" className="">{message}</Alert>
+                {/* Gate Pickup Location */}
+                <Select
+                  id="pickupLocation"
+                  label="3. Pickup Gate"
+                  value={pickupLocation}
+                  onChange={(e) => setPickupLocation(e.target.value)}
+                >
+                  {gateLocations.map((loc) => (
+                    <option key={loc} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
+                </Select>
 
-              {/* Submit Button */}
-              <Button type="submit" size="lg" disabled={isLoading} className="w-full">
-                {isLoading ? "Publishing Request…" : "Post Delivery Request 🚀"}
-              </Button>
-            </form>
-          </Card>
+                {/* Delivery Dropoff Location */}
+                <div>
+                  <label htmlFor="deliveryLocation" className="field-label">
+                    4. Hostel Destination
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-[1.3fr_0.7fr]">
+                    <Select
+                      id="deliveryLocation"
+                      value={deliveryLocation}
+                      onChange={(e) => setDeliveryLocation(e.target.value)}
+                    >
+                      {hostelLocations.map((loc) => (
+                        <option key={loc} value={loc}>
+                          {loc}
+                        </option>
+                      ))}
+                    </Select>
 
-          {/* Right Security & Preview Sidebar */}
-          <div className="space-y-6">
-            {/* Live Guarantee Box */}
-            <Card className="p-6 panel-mint">
+                    <Field
+                      id="roomNumber"
+                      type="text"
+                      placeholder="Room No."
+                      value={roomNumber}
+                      onChange={(e) => setRoomNumber(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {/* Pickup Time */}
+                <Field
+                  id="pickupTime"
+                  name="pickupTime"
+                  ref={pickupTimeRef}
+                  type="datetime-local"
+                  label="5. Deadline Time"
+                  onChange={(e) => setPickupTime(e.target.value)}
+                />
+
+                {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
+                {message && <Alert tone="success">{message}</Alert>}
+
+                <Button
+                  type="submit"
+                  size="lg"
+                  disabled={isLoading}
+                  className="w-full flex items-center justify-center gap-1.5 uppercase tracking-wider text-xs font-bold py-3.5 mt-2 shadow-glow"
+                >
+                  <span>{isLoading ? "Publishing Job..." : "Publish Delivery Request"}</span>
+                </Button>
+              </form>
+            </div>
+          </animated.div>
+
+          {/* Right Information Sidebar */}
+          <div className="space-y-6 lg:sticky lg:top-[85px]">
+            {/* OTP graphic */}
+            <div className="rounded-[2rem] border border-[#2563eb]/25 p-6 bg-gradient-to-b from-[#080d16] to-[#05070b]/60 shadow-glow relative overflow-hidden">
+              <div className="absolute top-[20%] right-[-10%] w-[150px] h-[150px] rounded-full bg-[#2563eb]/8 blur-2xl pointer-events-none" />
               <div className="flex items-center gap-2">
-                <span className="text-xl">🛡️</span>
-                <h3 className="font-display font-bold text-primary-hover">
-                  OTP Handshake Guarantee
+                <ShieldCheck className="h-5 w-5 text-primary" />
+                <h3 className="font-display font-bold text-white">
+                  OTP Security Protocol
                 </h3>
               </div>
-              <p className="mt-3 text-xs leading-relaxed text-muted">
-                When your order is created, UniFetch generates a private 6-digit confirmation code.
+              <p className="mt-3 text-xs leading-relaxed text-[#cbd5e1] font-semibold">
+                UniFetch generates a private 6-digit verification key for every errand request. Share this key with the carrier only when you inspect the package at your hostel.
               </p>
-              <div className="mt-4 rounded-2xl border border-accent/30 bg-surface p-4 text-center">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted">
-                  Sample Confirmation Code
+              
+              <div className="mt-5 rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#05070b]/80 p-4.5 text-center shadow-sm">
+                <p className="text-[9px] font-extrabold uppercase tracking-widest text-[#cbd5e1]">
+                  Private Handoff Key
                 </p>
-                <p className="mt-1 font-mono text-2xl font-black tracking-[0.3em] text-primary-hover">
+                <p className="mt-2 font-mono text-2.5xl font-black tracking-[0.3em] text-[#2563eb] select-none drop-shadow-[0_0_15px_rgba(37,99,235,0.35)]">
                   8 4 9 1 2 0
                 </p>
-                <p className="mt-1 text-[11px] text-muted">
-                  Only share this after receiving your parcel.
+                <p className="mt-1.5 text-[9px] text-[#cbd5e1] font-bold">
+                  Release code only after physical handover.
                 </p>
               </div>
-            </Card>
+            </div>
 
-            {/* Quick Tips */}
-            <Card className="p-6">
-              <h4 className="font-display font-bold text-primary-hover">
-                Campus Delivery Tips
+            {/* Quick tips card */}
+            <div className="rounded-[2rem] border border-[rgba(255,255,255,0.08)] p-6 bg-[#080d16]/30">
+              <h4 className="font-display font-bold text-white flex items-center gap-2 border-b border-[rgba(255,255,255,0.08)] pb-3">
+                <Info className="h-4 w-4 text-primary" />
+                Errand Posting Guidelines
               </h4>
-              <ul className="mt-4 space-y-3 text-xs text-muted">
-                <li className="flex items-start gap-2">
-                  <span className="text-accent font-bold">✓</span>
-                  <span>Tell your courier driver to drop your parcel at the security desk if they arrive early.</span>
+              <ul className="mt-4 space-y-3.5 text-xs text-[#cbd5e1] font-semibold">
+                <li className="flex items-start gap-2.5">
+                  <CheckCircle className="h-4.5 w-4.5 text-[#2563eb] shrink-0 mt-0.5" />
+                  <span>Enter clear description details so the carrier picks up the correct parcel box.</span>
                 </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-accent font-bold">✓</span>
-                  <span>Carriers are rewarded with credits right after OTP confirmation.</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="text-accent font-bold">✓</span>
-                  <span>You can cancel anytime while your request is still waiting for a carrier.</span>
+                <li className="flex items-start gap-2.5">
+                  <CheckCircle className="h-4.5 w-4.5 text-[#2563eb] shrink-0 mt-0.5" />
+                  <span>Credits are held securely in escrow until you release the verification OTP.</span>
                 </li>
               </ul>
-            </Card>
+            </div>
           </div>
         </div>
+
       </div>
-    </main>
+    </SidebarShell>
   );
 }

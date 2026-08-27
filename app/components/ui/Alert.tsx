@@ -4,9 +4,9 @@ import { cn } from "@/lib/utils";
 type Tone = "error" | "success" | "info";
 
 const tones: Record<Tone, string> = {
-  error: "border-[var(--color-danger-border)] bg-[var(--color-danger-tint)] text-[var(--color-danger)]",
-  success: "border-[var(--color-accent)/30] bg-[var(--color-accent-tint)] text-[var(--color-accent-strong)]",
-  info: "border-[var(--color-info-border)] bg-[var(--color-info-tint)] text-[var(--color-info)]",
+  error: "border-[rgba(239,68,68,0.2)] bg-[var(--color-danger-tint)] text-[var(--color-danger)]",
+  success: "border-[rgba(34,197,94,0.2)] bg-[var(--color-success-tint)] text-[var(--color-success)]",
+  info: "border-[rgba(37,99,235,0.2)] bg-[var(--color-primary-tint)] text-[var(--color-primary)]",
 };
 
 export function Alert({
