@@ -1,0 +1,218 @@
+-- ==============================================================================
+-- UniFetch Manual Credit Purchase Setup & Admin RPC Actions
+-- Run this script in the Supabase SQL Editor (Dashboard > SQL Editor > New Query)
+-- ==============================================================================
+
+-- 1. Create Credit purchase logs (manual UPI verification flow)
+CREATE TABLE IF NOT EXISTS public.credit_purchases (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  credits INTEGER NOT NULL,
+  amount NUMERIC NOT NULL,
+  payment_reference TEXT NOT NULL UNIQUE,
+  payment_proof_url TEXT DEFAULT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'completed', 'rejected'
+  approved_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  approved_at TIMESTAMPTZ DEFAULT NULL,
+  rejection_reason TEXT DEFAULT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Enable Row-Level Security (RLS)
+ALTER TABLE public.credit_purchases ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view their own credit purchases" ON public.credit_purchases;
+CREATE POLICY "Users can view their own credit purchases"
+  ON public.credit_purchases FOR SELECT
+  USING (auth.uid() = user_id OR public.is_admin());
+
+-- NOTE: Direct student INSERT policy is intentionally removed to prevent client spoofing.
+-- Transactions can only be created securely via the buy_credits() SECURITY DEFINER function.
+
+-- 2. Storage bucket for credit payment screenshot proofs
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('payment-proofs', 'payment-proofs', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- RLS policies for payment-proofs bucket
+DROP POLICY IF EXISTS "Students can upload their own proof" ON storage.objects;
+CREATE POLICY "Students can upload their own proof"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'payment-proofs' AND
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+DROP POLICY IF EXISTS "Students can view their own proof" ON storage.objects;
+CREATE POLICY "Students can view their own proof"
+  ON storage.objects FOR SELECT
+  USING (
+    bucket_id = 'payment-proofs' AND
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+DROP POLICY IF EXISTS "Admins can view all payment proofs" ON storage.objects;
+CREATE POLICY "Admins can view all payment proofs"
+  ON storage.objects FOR SELECT
+  USING (
+    bucket_id = 'payment-proofs' AND
+    EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin')
+  );
+
+-- 3. buy_credits RPC (posts a pending transaction for manual review)
+CREATE OR REPLACE FUNCTION public.buy_credits(
+  p_credits INTEGER,
+  p_payment_reference TEXT,
+  p_payment_proof_url TEXT DEFAULT NULL
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_amount NUMERIC;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  -- Ensure only approved students can buy credits
+  IF NOT public.is_approved_student() THEN
+    RAISE EXCEPTION 'User not approved to purchase credits';
+  END IF;
+
+  -- Ensure valid package quantity and set simulated price
+  IF p_credits = 100 THEN
+    v_amount := 10;
+  ELSIF p_credits = 500 THEN
+    v_amount := 50;
+  ELSIF p_credits = 1000 THEN
+    v_amount := 100;
+  ELSE
+    RAISE EXCEPTION 'Invalid credits amount. Must be 100, 500, or 1000.';
+  END IF;
+
+  -- Validation: require payment reference
+  IF p_payment_reference IS NULL OR length(trim(p_payment_reference)) < 3 THEN
+    RAISE EXCEPTION 'Payment reference ID is required';
+  END IF;
+
+  -- Validation: payment_proof_url must represent local private storage object key inside users folder
+  IF p_payment_proof_url IS NOT NULL THEN
+    IF p_payment_proof_url LIKE 'http://%' OR p_payment_proof_url LIKE 'https://%' THEN
+      RAISE EXCEPTION 'Payment proof must be a valid storage file path, not an external URL';
+    END IF;
+    IF p_payment_proof_url NOT LIKE auth.uid()::text || '/receipt-%' THEN
+      RAISE EXCEPTION 'Invalid payment proof file path format';
+    END IF;
+  END IF;
+
+  -- Rate limiting: prevent buying credits more than once every 10 seconds per user
+  IF EXISTS (
+    SELECT 1 FROM public.credit_purchases
+    WHERE user_id = auth.uid()
+      AND created_at > NOW() - INTERVAL '10 seconds'
+  ) THEN
+    RAISE EXCEPTION 'Please wait before making another purchase';
+  END IF;
+
+  -- Log the purchase as PENDING (no credits awarded here!)
+  INSERT INTO public.credit_purchases (user_id, credits, amount, payment_reference, payment_proof_url, status)
+  VALUES (auth.uid(), p_credits, v_amount, trim(p_payment_reference), p_payment_proof_url, 'pending');
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- 4. Approve credit purchase and award credits atomically (with double-approval prevention)
+CREATE OR REPLACE FUNCTION public.approve_credit_purchase(
+  p_purchase_id UUID
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_user_id UUID;
+  v_credits INTEGER;
+  v_status TEXT;
+BEGIN
+  -- Check admin authorization
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Permission denied: Admin only';
+  END IF;
+
+  -- Get transaction details and lock the row to prevent race conditions
+  SELECT user_id, credits, status INTO v_user_id, v_credits, v_status
+  FROM public.credit_purchases
+  WHERE id = p_purchase_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Purchase transaction not found';
+  END IF;
+
+  -- Prevent double execution (Atomic check)
+  IF v_status <> 'pending' THEN
+    RAISE EXCEPTION 'Transaction is already processed. Current status: %', v_status;
+  END IF;
+
+  -- Update purchase status
+  UPDATE public.credit_purchases
+  SET 
+    status = 'completed',
+    approved_by = auth.uid(),
+    approved_at = NOW(),
+    updated_at = NOW()
+  WHERE id = p_purchase_id;
+
+  -- Award credits to the student (bypass trigger using session var)
+  PERFORM set_config('unifetch.allow_credit_payout', 'true', false);
+  UPDATE public.profiles
+  SET credits = credits + v_credits, updated_at = NOW()
+  WHERE id = v_user_id;
+  PERFORM set_config('unifetch.allow_credit_payout', 'false', false);
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+
+-- 5. Reject credit purchase
+CREATE OR REPLACE FUNCTION public.reject_credit_purchase(
+  p_purchase_id UUID,
+  p_rejection_reason TEXT
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+  v_status TEXT;
+BEGIN
+  -- Check admin authorization
+  IF NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Permission denied: Admin only';
+  END IF;
+
+  -- Get transaction details and lock the row
+  SELECT status INTO v_status
+  FROM public.credit_purchases
+  WHERE id = p_purchase_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Purchase transaction not found';
+  END IF;
+
+  -- Prevent double execution
+  IF v_status <> 'pending' THEN
+    RAISE EXCEPTION 'Transaction is already processed. Current status: %', v_status;
+  END IF;
+
+  -- Update purchase status to rejected
+  UPDATE public.credit_purchases
+  SET 
+    status = 'rejected',
+    rejection_reason = p_rejection_reason,
+    approved_by = auth.uid(),
+    approved_at = NOW(),
+    updated_at = NOW()
+  WHERE id = p_purchase_id;
+
+  RETURN TRUE;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

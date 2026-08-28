@@ -198,7 +198,12 @@ export default function CarryPackagePage() {
         {/* Title area */}
         <div className="border-b border-[rgba(255,255,255,0.08)] pb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
           <div>
-            <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Carrier Marketplace</span>
+            <div className="flex flex-wrap items-center gap-2 mb-2">
+              <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Within College</span>
+              <span className="text-[9px] bg-[#2563eb]/15 text-primary border border-[#2563eb]/30 px-2.5 py-0.5 rounded-full font-extrabold uppercase tracking-wider">
+                Payment Type: UniFetch Credits
+              </span>
+            </div>
             <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
               Carry & Earn Campus Credits
             </h1>

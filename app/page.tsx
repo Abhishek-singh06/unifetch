@@ -25,12 +25,14 @@ import { supabase } from "@/lib/supabase/client";
 import { LogoMark } from "./components/ui/Logo";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import NavItem from "./components/NavItem";
+import { withinCollegeItems } from "@/lib/navConfig";
 
 const tickerItems = [
   "⚡ Rahul accepted a package to Library Gate",
-  "🪙 Sneha delivered to Hostel 3",
+  "🪙 Sneha delivered to Hostel C",
   "🛡️ Aman is on the way to Main Gate",
-  "📦 Food parcel delivered to Hostel 4 in 12 mins",
+  "📦 Food parcel delivered to Hostel D2 in 12 mins",
   "⭐ Campus Trust Rating: 4.95 / 5.0 across 1,420+ deliveries"
 ];
 
@@ -40,7 +42,7 @@ const mockPreviews = [
     label: "📦 Amazon Package",
     item: "AirPods Pro & Books",
     pickup: "Main Gate • Security Desk",
-    dropoff: "Hostel 3 • Room 214",
+    dropoff: "Hostel C • Room 214",
     status: "Carrier En Route",
     carrier: "Devansh R.",
     branch: "ECE '26",
@@ -58,7 +60,7 @@ const mockPreviews = [
     label: "🍔 Food & Drinks",
     item: "Subway Meal + Cold Coffee",
     pickup: "North Turnstile Gate",
-    dropoff: "Girls Hostel Block A",
+    dropoff: "Hostel A",
     status: "Picked Up",
     carrier: "Meera S.",
     branch: "CS '25",
@@ -120,7 +122,17 @@ export default function Home() {
   const [ordersPerWeek, setOrdersPerWeek] = useState(3);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  // Scroll effect for header background
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 8);
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   // Real stats state
   const [realStats, setRealStats] = useState({
     activeStudents: "2K+",
@@ -292,7 +304,13 @@ export default function Home() {
       <div className="absolute bottom-[15%] left-[5%] w-[450px] h-[450px] rounded-full bg-[#2563eb]/6 blur-[120px] pointer-events-none" />
 
       {/* Navigation Header */}
-      <header className="sticky top-0 z-50 border-b border-[rgba(255,255,255,0.08)] bg-[#05070b]/75 backdrop-blur-md">
+      <header
+        className={`sticky top-0 z-50 border-b transition-all duration-250 ${
+          isScrolled
+            ? "bg-[#080d16] border-[rgba(255,255,255,0.12)] shadow-glow"
+            : "bg-[#05070b]/75 backdrop-blur-md border-[rgba(255,255,255,0.08)]"
+        }`}
+      >
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-8">
           <Link href="/" className="flex items-center gap-3.5 group" aria-label="UniFetch Home">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white border border-primary/20 shadow-primary transition-transform duration-200 group-hover:scale-105">
@@ -304,16 +322,24 @@ export default function Home() {
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-8 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] md:flex">
-            <a href="#how-it-works" className="transition hover:text-white">How It Works</a>
-            <a href="#features" className="transition hover:text-white">Features</a>
-            <a href="#calculator" className="transition hover:text-white">For Campus</a>
-            <a href="#faqs" className="transition hover:text-white">FAQs</a>
+          <nav className="hidden items-center gap-1 md:flex">
+            {/* Section anchor links (non-auth) */}
+            <a href="#how-it-works" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">How It Works</a>
+            <a href="#features" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">Features</a>
+            <a href="#calculator" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">For Campus</a>
+            <a href="#faqs" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">FAQs</a>
 
+            {/* Authenticated nav items using shared NavItem component */}
             {isLoggedIn && (
               <>
-                <Link href="/requests" className="transition hover:text-white">My Requests</Link>
-                <Link href="/carry" className="transition hover:text-white">Carry Packages</Link>
+                <NavItem
+                  item={withinCollegeItems.find((i) => i.path === "/requests")!}
+                  isActive={false}
+                />
+                <NavItem
+                  item={withinCollegeItems.find((i) => i.path === "/carry")!}
+                  isActive={false}
+                />
               </>
             )}
           </nav>
@@ -367,8 +393,19 @@ export default function Home() {
                 <a href="#faqs" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">FAQs</a>
                 {isLoggedIn ? (
                   <>
-                    <Link href="/requests" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">My Requests</Link>
-                    <Link href="/carry" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">Carry Packages</Link>
+                    <div className="pt-2 border-t border-[rgba(255,255,255,0.04)]">
+                      <span className="text-[8px] font-extrabold uppercase tracking-widest text-primary/70 block mb-2 px-2">Within College</span>
+                      <div className="space-y-1">
+                        {withinCollegeItems.map((item) => (
+                          <NavItem
+                            key={item.path}
+                            item={item}
+                            isActive={false}
+                            onClick={() => setMobileMenuOpen(false)}
+                          />
+                        ))}
+                      </div>
+                    </div>
                     <div className="flex items-center gap-2 py-2 text-xs font-bold text-white">
                       <span>🪙 Balance:</span>
                       <span>{userCredits} Credits</span>
@@ -423,14 +460,60 @@ export default function Home() {
                 The fastest and safest way to send, carry, and receive packages on campus.
               </p>
 
-              {/* CTA Buttons */}
-              <div className="pt-2 flex flex-col sm:flex-row gap-4 max-w-md">
-                <Link href={isLoggedIn ? "/request" : "/signup"} className="neo-btn-primary px-8 py-4 text-xs font-extrabold uppercase tracking-widest shadow-glow">
-                  Send a Package
-                </Link>
-                <Link href="/carry" className="neo-btn-secondary px-8 py-4 text-xs font-extrabold uppercase tracking-widest border-[rgba(255,255,255,0.08)] bg-transparent hover:bg-white/5">
-                  Become a Carrier
-                </Link>
+              {/* Choice Section: What do you need? */}
+              <div className="pt-4 space-y-6">
+                <h3 className="text-xs font-bold text-[#2563eb] uppercase tracking-wider">
+                  What do you need?
+                </h3>
+                <div className="grid gap-6 sm:grid-cols-2">
+                  {/* Option 1: Within College */}
+                  <div className="neo-card flex flex-col justify-between p-6 space-y-4 border border-[rgba(255,255,255,0.08)] bg-[#080d16]/50 rounded-2xl hover:border-[#2563eb]/30 transition-all duration-300">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🏫</span>
+                        <h4 className="font-display text-lg font-bold text-white">Within College</h4>
+                      </div>
+                      <p className="text-xs text-[#cbd5e1] leading-relaxed">
+                        Need something carried or delivered inside college? Request a student to help using UniFetch Credits.
+                      </p>
+                      <ul className="text-[10px] text-primary/80 font-bold space-y-1 pt-2 uppercase tracking-wider">
+                        <li>• 50 Credits to request</li>
+                        <li>• +35 Credits for completing delivery</li>
+                        <li>• Local Dorm Carry</li>
+                      </ul>
+                    </div>
+                    <Link
+                      href={isLoggedIn ? "/requests" : "/signup"}
+                      className="neo-btn-primary w-full py-3 text-center text-xs font-extrabold uppercase tracking-widest shadow-glow inline-block"
+                    >
+                      Within College
+                    </Link>
+                  </div>
+
+                  {/* Option 2: Outside Campus */}
+                  <div className="neo-card flex flex-col justify-between p-6 space-y-4 border border-[rgba(255,255,255,0.08)] bg-[#080d16]/50 rounded-2xl hover:border-[#2563eb]/30 transition-all duration-300">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🚗</span>
+                        <h4 className="font-display text-lg font-bold text-white">Outside Campus</h4>
+                      </div>
+                      <p className="text-xs text-[#cbd5e1] leading-relaxed">
+                        Going outside campus or need something brought from Chennai or another location? Connect with another student and agree on the price directly.
+                      </p>
+                      <ul className="text-[10px] text-primary/80 font-bold space-y-1 pt-2 uppercase tracking-wider">
+                        <li>• Real Money • Student to Student</li>
+                        <li>• Buy/Return/Repair/Pickup</li>
+                        <li>• Direct UPI QR Transfers</li>
+                      </ul>
+                    </div>
+                    <Link
+                      href={isLoggedIn ? "/outside/browse" : "/signup"}
+                      className="neo-btn-secondary w-full py-3 text-center text-xs font-extrabold uppercase tracking-widest border-[rgba(255,255,255,0.08)] bg-transparent hover:bg-white/5 inline-block"
+                    >
+                      Outside Campus
+                    </Link>
+                  </div>
+                </div>
               </div>
             </animated.div>
 
