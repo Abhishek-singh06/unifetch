@@ -25,6 +25,8 @@ import { supabase } from "@/lib/supabase/client";
 import { LogoMark } from "./components/ui/Logo";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
+import NavItem from "./components/NavItem";
+import { withinCollegeItems } from "@/lib/navConfig";
 
 const tickerItems = [
   "⚡ Rahul accepted a package to Library Gate",
@@ -120,7 +122,17 @@ export default function Home() {
   const [ordersPerWeek, setOrdersPerWeek] = useState(3);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  // Scroll effect for header background
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 8);
+    };
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
+
   // Real stats state
   const [realStats, setRealStats] = useState({
     activeStudents: "2K+",
@@ -292,7 +304,13 @@ export default function Home() {
       <div className="absolute bottom-[15%] left-[5%] w-[450px] h-[450px] rounded-full bg-[#2563eb]/6 blur-[120px] pointer-events-none" />
 
       {/* Navigation Header */}
-      <header className="sticky top-0 z-50 border-b border-[rgba(255,255,255,0.08)] bg-[#05070b]/75 backdrop-blur-md">
+      <header
+        className={`sticky top-0 z-50 border-b transition-all duration-250 ${
+          isScrolled
+            ? "bg-[#080d16] border-[rgba(255,255,255,0.12)] shadow-glow"
+            : "bg-[#05070b]/75 backdrop-blur-md border-[rgba(255,255,255,0.08)]"
+        }`}
+      >
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-8">
           <Link href="/" className="flex items-center gap-3.5 group" aria-label="UniFetch Home">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white border border-primary/20 shadow-primary transition-transform duration-200 group-hover:scale-105">
@@ -304,16 +322,24 @@ export default function Home() {
             </div>
           </Link>
 
-          <nav className="hidden items-center gap-8 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] md:flex">
-            <a href="#how-it-works" className="transition hover:text-white">How It Works</a>
-            <a href="#features" className="transition hover:text-white">Features</a>
-            <a href="#calculator" className="transition hover:text-white">For Campus</a>
-            <a href="#faqs" className="transition hover:text-white">FAQs</a>
+          <nav className="hidden items-center gap-1 md:flex">
+            {/* Section anchor links (non-auth) */}
+            <a href="#how-it-works" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">How It Works</a>
+            <a href="#features" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">Features</a>
+            <a href="#calculator" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">For Campus</a>
+            <a href="#faqs" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">FAQs</a>
 
+            {/* Authenticated nav items using shared NavItem component */}
             {isLoggedIn && (
               <>
-                <Link href="/requests" className="transition hover:text-white">My Requests</Link>
-                <Link href="/carry" className="transition hover:text-white">Carry Packages</Link>
+                <NavItem
+                  item={withinCollegeItems.find((i) => i.path === "/requests")!}
+                  isActive={false}
+                />
+                <NavItem
+                  item={withinCollegeItems.find((i) => i.path === "/carry")!}
+                  isActive={false}
+                />
               </>
             )}
           </nav>
@@ -367,8 +393,19 @@ export default function Home() {
                 <a href="#faqs" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">FAQs</a>
                 {isLoggedIn ? (
                   <>
-                    <Link href="/requests" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">My Requests</Link>
-                    <Link href="/carry" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">Carry Packages</Link>
+                    <div className="pt-2 border-t border-[rgba(255,255,255,0.04)]">
+                      <span className="text-[8px] font-extrabold uppercase tracking-widest text-primary/70 block mb-2 px-2">Within College</span>
+                      <div className="space-y-1">
+                        {withinCollegeItems.map((item) => (
+                          <NavItem
+                            key={item.path}
+                            item={item}
+                            isActive={false}
+                            onClick={() => setMobileMenuOpen(false)}
+                          />
+                        ))}
+                      </div>
+                    </div>
                     <div className="flex items-center gap-2 py-2 text-xs font-bold text-white">
                       <span>🪙 Balance:</span>
                       <span>{userCredits} Credits</span>
