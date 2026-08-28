@@ -11,7 +11,8 @@ import {
   X, 
   Coins, 
   PlusCircle, 
-  Inbox 
+  Inbox,
+  MessageSquare
 } from "lucide-react";
 import { useTransition, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
@@ -27,6 +28,7 @@ export function SidebarShell({ children }: SidebarShellProps) {
 
   const [studentName, setStudentName] = useState("Student");
   const [studentCredits, setStudentCredits] = useState(100);
+  const [userRole, setUserRole] = useState("student");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
@@ -36,13 +38,14 @@ export function SidebarShell({ children }: SidebarShellProps) {
 
       const { data: profile } = await supabase
         .from("profiles")
-        .select("full_name, credits")
+        .select("full_name, credits, role")
         .eq("id", user.id)
         .single();
 
       if (profile) {
         setStudentName(profile.full_name || "Student");
         setStudentCredits(profile.credits || 0);
+        setUserRole(profile.role || "student");
       }
     }
 
@@ -55,11 +58,24 @@ export function SidebarShell({ children }: SidebarShellProps) {
     router.refresh();
   }
 
-  const navItems = [
+  const withinCollegeItems = [
     { label: "My Requests", path: "/requests", icon: Inbox },
     { label: "Carry Packages", path: "/carry", icon: Compass },
     { label: "Post Request", path: "/request", icon: PlusCircle },
-    { label: "ID Verification", path: "/verification", icon: ShieldCheck },
+    { label: "Buy Credits", path: "/credits", icon: Coins },
+  ];
+
+  const outsideCampusItems = [
+    { label: "Browse Feed", path: "/outside/browse", icon: Compass },
+    { label: "Create Request", path: "/outside/create", icon: PlusCircle },
+    { label: "My Tasks", path: "/outside/tasks", icon: Inbox },
+    { label: "Messages", path: "/outside/messages", icon: MessageSquare },
+    { label: "Payments", path: "/outside/payments", icon: Coins },
+  ];
+
+  const adminItems = [
+    { label: "Student ID Approvals", path: "/admin", icon: ShieldCheck },
+    { label: "Credit Approvals", path: "/admin/credits", icon: Coins },
   ];
 
   // Mobile menu drawer animation using React Spring
@@ -74,7 +90,7 @@ export function SidebarShell({ children }: SidebarShellProps) {
     <div className="min-h-screen bg-[#05070b] text-[#ffffff] grid-bg flex flex-col md:flex-row relative overflow-x-hidden">
       
       {/* 1. Desktop Sidebar */}
-      <aside className="hidden md:flex md:w-[280px] shrink-0 flex-col justify-between border-r border-[rgba(255,255,255,0.08)] bg-[#080d16] p-6 z-30">
+      <aside className="hidden md:flex md:w-[280px] shrink-0 flex-col justify-between border-r border-[rgba(255,255,255,0.08)] bg-[#080d16] p-6 z-30 overflow-y-auto">
         <div className="space-y-8">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3.5 group">
@@ -99,26 +115,93 @@ export function SidebarShell({ children }: SidebarShellProps) {
           </div>
 
           {/* Nav Items */}
-          <nav className="space-y-1.5">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.path;
-              return (
-                <Link
-                  key={item.path}
-                  href={item.path}
-                  className={`flex items-center gap-3.5 px-4.5 py-3.5 rounded-xl text-[10px] font-bold uppercase tracking-wider transition-all ${
-                    isActive
-                      ? "bg-primary text-white border border-primary/20 shadow-primary"
-                      : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
-                  }`}
-                >
-                  <Icon className={`h-4.5 w-4.5 ${isActive ? "text-white" : "text-primary"}`} />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-          </nav>
+          <div className="space-y-6">
+            <div>
+              <span className="px-3 text-[8px] font-extrabold uppercase tracking-widest text-primary/70 block mb-2">Within College</span>
+              <nav className="space-y-1">
+                {withinCollegeItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      href={item.path}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase tracking-wider transition-all ${
+                        isActive
+                          ? "bg-primary text-white border border-primary/20 shadow-primary"
+                          : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                      }`}
+                    >
+                      <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-primary"}`} />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+
+            <div>
+              <span className="px-3 text-[8px] font-extrabold uppercase tracking-widest text-[#10b981]/70 block mb-2">Outside Campus</span>
+              <nav className="space-y-1">
+                {outsideCampusItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      href={item.path}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase tracking-wider transition-all ${
+                        isActive
+                          ? "bg-[#10b981] text-white border border-[#10b981]/20 shadow-md shadow-[#10b981]/20"
+                          : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                      }`}
+                    >
+                      <Icon className={`h-4 w-4 ${isActive ? "text-white" : "text-[#10b981]"}`} />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+            
+            {userRole === "admin" && (
+              <div className="pt-2 border-t border-[rgba(255,255,255,0.04)]">
+                <span className="px-3 text-[8px] font-extrabold uppercase tracking-widest text-[#ef4444] block mb-2">Admin Panel</span>
+                <nav className="space-y-1">
+                  {adminItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = pathname === item.path;
+                    return (
+                      <Link
+                        key={item.path}
+                        href={item.path}
+                        className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-[9px] font-bold uppercase tracking-wider transition-all ${
+                          isActive
+                            ? "bg-[#ef4444]/10 text-[#ef4444] border border-[#ef4444]/20 shadow-glow"
+                            : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                        }`}
+                      >
+                        <Icon className={`h-4 w-4 ${isActive ? "text-[#ef4444]" : "text-[#ef4444]/70"}`} />
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </nav>
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-[rgba(255,255,255,0.04)]">
+              <Link
+                href="/verification"
+                className={`flex items-center gap-3 px-3 py-2 rounded-xl text-[9px] font-bold uppercase tracking-wider transition-all ${
+                  pathname === "/verification" ? "bg-white/10 text-white" : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                <span>Verification</span>
+              </Link>
+            </div>
+          </div>
         </div>
 
         {/* User Card */}
@@ -172,35 +255,106 @@ export function SidebarShell({ children }: SidebarShellProps) {
         isOpen ? (
           <animated.nav
             style={style}
-            className="flex md:hidden flex-col bg-[#080d16]/95 backdrop-blur-md border-b border-[rgba(255,255,255,0.08)] px-6 py-4 space-y-2 z-40 sticky top-[69px] shadow-glow overflow-hidden"
+            className="flex md:hidden flex-col bg-[#080d16]/95 backdrop-blur-md border-b border-[rgba(255,255,255,0.08)] px-6 py-4 space-y-4 z-40 sticky top-[69px] shadow-glow overflow-y-auto max-h-[calc(100vh-70px)]"
           >
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = pathname === item.path;
-              return (
-                <Link
-                  key={item.path}
-                  href={item.path}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={`flex items-center gap-3 px-4.5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
-                    isActive
-                      ? "bg-primary text-white"
-                      : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
-                  }`}
-                >
-                  <Icon className={`h-4.5 w-4.5 ${isActive ? "text-white" : "text-primary"}`} />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
-            <button
-              type="button"
-              onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
-              className="flex items-center gap-3 px-4.5 py-3 rounded-xl text-xs font-bold uppercase tracking-wider text-[#ef4444] hover:bg-[#ef4444]/10 w-full text-left transition-colors"
-            >
-              <LogOut className="h-4.5 w-4.5" />
-              <span>Sign Out</span>
-            </button>
+            <div>
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-primary/70 block mb-2 px-2">Within College</span>
+              <div className="space-y-1">
+                {withinCollegeItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      href={item.path}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                        isActive
+                          ? "bg-primary text-white"
+                          : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                      }`}
+                    >
+                      <Icon className={`h-4.5 w-4.5 ${isActive ? "text-white" : "text-primary"}`} />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div>
+              <span className="text-[9px] font-extrabold uppercase tracking-widest text-[#10b981]/70 block mb-2 px-2">Outside Campus</span>
+              <div className="space-y-1">
+                {outsideCampusItems.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = pathname === item.path;
+                  return (
+                    <Link
+                      key={item.path}
+                      href={item.path}
+                      onClick={() => setMobileMenuOpen(false)}
+                      className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                        isActive
+                          ? "bg-[#10b981] text-white"
+                          : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                      }`}
+                    >
+                      <Icon className={`h-4.5 w-4.5 ${isActive ? "text-white" : "text-[#10b981]"}`} />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+
+            {userRole === "admin" && (
+              <div className="pt-2 border-t border-[rgba(255,255,255,0.04)]">
+                <span className="text-[9px] font-extrabold uppercase tracking-widest text-[#ef4444] block mb-2 px-2">Admin Panel</span>
+                <div className="space-y-1">
+                  {adminItems.map((item) => {
+                    const Icon = item.icon;
+                    const isActive = pathname === item.path;
+                    return (
+                      <Link
+                        key={item.path}
+                        href={item.path}
+                        onClick={() => setMobileMenuOpen(false)}
+                        className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                          isActive
+                            ? "bg-[#ef4444]/10 text-[#ef4444] border border-[#ef4444]/20 shadow-glow"
+                            : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                        }`}
+                      >
+                        <Icon className={`h-4.5 w-4.5 ${isActive ? "text-[#ef4444]" : "text-[#ef4444]/70"}`} />
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-[rgba(255,255,255,0.04)] space-y-1">
+              <Link
+                href="/verification"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                  pathname === "/verification" ? "bg-white/10 text-white" : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                <ShieldCheck className="h-4.5 w-4.5 text-primary" />
+                <span>Verification</span>
+              </Link>
+
+              <button
+                type="button"
+                onClick={() => { handleLogout(); setMobileMenuOpen(false); }}
+                className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider text-[#ef4444] hover:bg-[#ef4444]/10 w-full text-left transition-colors"
+              >
+                <LogOut className="h-4.5 w-4.5" />
+                <span>Sign Out</span>
+              </button>
+            </div>
           </animated.nav>
         ) : null
       )}

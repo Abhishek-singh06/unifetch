@@ -18,6 +18,8 @@ const packageCategories = [
   { id: "other", label: "Other Parcel", icon: "🎁", placeholder: "e.g. Fragile package from home" },
 ];
 
+import { HOSTELS } from "@/lib/config";
+
 const gateLocations = [
   "Main Gate • Security Parcel Counter",
   "North Turnstile • Delivery Zone",
@@ -25,16 +27,7 @@ const gateLocations = [
   "South Gate Entry Point",
 ];
 
-const hostelLocations = [
-  "Hostel 1 (Boys)",
-  "Hostel 2 (Boys)",
-  "Hostel 3 (Boys)",
-  "Hostel 4 (Boys)",
-  "Girls Hostel Block A",
-  "Girls Hostel Block B",
-  "PG / International Hostel",
-  "Central Library Ground Floor",
-];
+const hostelLocations = HOSTELS;
 
 export default function RequestPackagePage() {
   const router = useRouter();

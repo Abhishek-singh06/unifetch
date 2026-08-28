@@ -28,9 +28,9 @@ import { Card } from "./components/ui/Card";
 
 const tickerItems = [
   "⚡ Rahul accepted a package to Library Gate",
-  "🪙 Sneha delivered to Hostel 3",
+  "🪙 Sneha delivered to Hostel C",
   "🛡️ Aman is on the way to Main Gate",
-  "📦 Food parcel delivered to Hostel 4 in 12 mins",
+  "📦 Food parcel delivered to Hostel D2 in 12 mins",
   "⭐ Campus Trust Rating: 4.95 / 5.0 across 1,420+ deliveries"
 ];
 
@@ -40,7 +40,7 @@ const mockPreviews = [
     label: "📦 Amazon Package",
     item: "AirPods Pro & Books",
     pickup: "Main Gate • Security Desk",
-    dropoff: "Hostel 3 • Room 214",
+    dropoff: "Hostel C • Room 214",
     status: "Carrier En Route",
     carrier: "Devansh R.",
     branch: "ECE '26",
@@ -58,7 +58,7 @@ const mockPreviews = [
     label: "🍔 Food & Drinks",
     item: "Subway Meal + Cold Coffee",
     pickup: "North Turnstile Gate",
-    dropoff: "Girls Hostel Block A",
+    dropoff: "Hostel A",
     status: "Picked Up",
     carrier: "Meera S.",
     branch: "CS '25",
@@ -423,14 +423,60 @@ export default function Home() {
                 The fastest and safest way to send, carry, and receive packages on campus.
               </p>
 
-              {/* CTA Buttons */}
-              <div className="pt-2 flex flex-col sm:flex-row gap-4 max-w-md">
-                <Link href={isLoggedIn ? "/request" : "/signup"} className="neo-btn-primary px-8 py-4 text-xs font-extrabold uppercase tracking-widest shadow-glow">
-                  Send a Package
-                </Link>
-                <Link href="/carry" className="neo-btn-secondary px-8 py-4 text-xs font-extrabold uppercase tracking-widest border-[rgba(255,255,255,0.08)] bg-transparent hover:bg-white/5">
-                  Become a Carrier
-                </Link>
+              {/* Choice Section: What do you need? */}
+              <div className="pt-4 space-y-6">
+                <h3 className="text-xs font-bold text-[#2563eb] uppercase tracking-wider">
+                  What do you need?
+                </h3>
+                <div className="grid gap-6 sm:grid-cols-2">
+                  {/* Option 1: Within College */}
+                  <div className="neo-card flex flex-col justify-between p-6 space-y-4 border border-[rgba(255,255,255,0.08)] bg-[#080d16]/50 rounded-2xl hover:border-[#2563eb]/30 transition-all duration-300">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🏫</span>
+                        <h4 className="font-display text-lg font-bold text-white">Within College</h4>
+                      </div>
+                      <p className="text-xs text-[#cbd5e1] leading-relaxed">
+                        Need something carried or delivered inside college? Request a student to help using UniFetch Credits.
+                      </p>
+                      <ul className="text-[10px] text-primary/80 font-bold space-y-1 pt-2 uppercase tracking-wider">
+                        <li>• 50 Credits to request</li>
+                        <li>• +35 Credits for completing delivery</li>
+                        <li>• Local Dorm Carry</li>
+                      </ul>
+                    </div>
+                    <Link
+                      href={isLoggedIn ? "/requests" : "/signup"}
+                      className="neo-btn-primary w-full py-3 text-center text-xs font-extrabold uppercase tracking-widest shadow-glow inline-block"
+                    >
+                      Within College
+                    </Link>
+                  </div>
+
+                  {/* Option 2: Outside Campus */}
+                  <div className="neo-card flex flex-col justify-between p-6 space-y-4 border border-[rgba(255,255,255,0.08)] bg-[#080d16]/50 rounded-2xl hover:border-[#2563eb]/30 transition-all duration-300">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xl">🚗</span>
+                        <h4 className="font-display text-lg font-bold text-white">Outside Campus</h4>
+                      </div>
+                      <p className="text-xs text-[#cbd5e1] leading-relaxed">
+                        Going outside campus or need something brought from Chennai or another location? Connect with another student and agree on the price directly.
+                      </p>
+                      <ul className="text-[10px] text-primary/80 font-bold space-y-1 pt-2 uppercase tracking-wider">
+                        <li>• Real Money • Student to Student</li>
+                        <li>• Buy/Return/Repair/Pickup</li>
+                        <li>• Direct UPI QR Transfers</li>
+                      </ul>
+                    </div>
+                    <Link
+                      href={isLoggedIn ? "/outside/browse" : "/signup"}
+                      className="neo-btn-secondary w-full py-3 text-center text-xs font-extrabold uppercase tracking-widest border-[rgba(255,255,255,0.08)] bg-transparent hover:bg-white/5 inline-block"
+                    >
+                      Outside Campus
+                    </Link>
+                  </div>
+                </div>
               </div>
             </animated.div>
 
