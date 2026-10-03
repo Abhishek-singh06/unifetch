@@ -1,0 +1,15 @@
+-- ==============================================================================
+-- UNIFETCH V2 - CREDITS VERIFICATION SQL
+-- Run in Supabase SQL Editor after UNIFETCH_V2_CREDITS_ALIGNMENT_MIGRATION.sql.txt
+-- Read-only verification query
+-- ==============================================================================
+
+SELECT 
+  column_name, 
+  data_type, 
+  is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public' 
+  AND table_name = 'credit_purchases'
+  AND column_name IN ('amount', 'amount_inr', 'credits', 'status')
+ORDER BY column_name;

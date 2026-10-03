@@ -5,9 +5,12 @@ import { FormEvent, useState } from "react";
 import { Calendar, ArrowLeft } from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, addDemoTrip } from "@/lib/demoSession";
 import { SidebarShell } from "../../../components/SidebarShell";
 import { Button } from "../../../components/ui/Button";
 import { Alert } from "../../../components/ui/Alert";
+import TrialRestrictedModal from "../../../components/ui/TrialRestrictedModal";
+import PendingVerificationModal from "../../../components/ui/PendingVerificationModal";
 import Link from "next/link";
 
 const helpOptionTypes = [
@@ -34,6 +37,27 @@ export default function CreateTripAnnouncementPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [showTrialModal, setShowTrialModal] = useState(false);
+  const [showPendingModal, setShowPendingModal] = useState(false);
+
+  function handleTrialContinueSimulate() {
+    setShowTrialModal(false);
+    addDemoTrip({
+      origin: origin.trim() || "College",
+      destination: destination.trim() || "City Center",
+      departure_date: departureDate || new Date().toISOString().split("T")[0],
+      departure_time: departureTime.trim() || null,
+      return_date: returnDate || null,
+      return_time: returnTime.trim() || null,
+      help_types: selectedHelpTypes,
+      note: note.trim() || null,
+    });
+    setMessage("🎉 [Demo Simulation] Trip announced with sample data!");
+    setTimeout(() => {
+      router.push("/outside/browse");
+      router.refresh();
+    }, 800);
+  }
 
   function handleToggleHelpType(id: string) {
     setSelectedHelpTypes((prev) =>
@@ -45,6 +69,12 @@ export default function CreateTripAnnouncementPage() {
     event.preventDefault();
     setMessage("");
     setErrorMessage("");
+
+    if (isDemoMode()) {
+      setShowTrialModal(true);
+      return;
+    }
+
     setIsLoading(true);
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -53,6 +83,26 @@ export default function CreateTripAnnouncementPage() {
       setIsLoading(false);
       return;
     }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("verification_status")
+      .eq("id", user.id)
+      .single();
+
+    if (
+      profile &&
+      profile.verification_status !== "approved" &&
+      profile.verification_status !== "verified" &&
+      profile.verification_status !== "submitted" &&
+      profile.verification_status !== "id_submitted"
+    ) {
+      setIsLoading(false);
+      setShowPendingModal(true);
+      return;
+    }
+
+    const userId = user.id;
 
     if (!destination.trim()) {
       setErrorMessage("Please specify a destination.");
@@ -69,7 +119,7 @@ export default function CreateTripAnnouncementPage() {
     const { error } = await supabase
       .from("outside_trips")
       .insert({
-        creator_id: user.id,
+        creator_id: userId,
         origin: origin.trim(),
         destination: destination.trim(),
         departure_date: departureDate,
@@ -307,6 +357,19 @@ export default function CreateTripAnnouncementPage() {
           </div>
         </div>
       </div>
+
+      <TrialRestrictedModal
+        isOpen={showTrialModal}
+        onClose={handleTrialContinueSimulate}
+        actionName="Publish Travel Trip"
+        description="Trial users can explore trip routes, but announcing live travel plans and earning delivery rewards requires a verified student account."
+      />
+
+      <PendingVerificationModal
+        isOpen={showPendingModal}
+        onClose={() => setShowPendingModal(false)}
+        actionName="Publish Travel Trip"
+      />
     </SidebarShell>
   );
 }

@@ -1,0 +1,106 @@
+-- ==============================================================================
+-- UNIFETCH V2: VERIFICATION STATUS & ONBOARDING ALIGNMENT MIGRATION
+-- ==============================================================================
+-- Purpose:
+-- 1. Update the verification_status CHECK constraint on public.profiles to allow:
+--    'pending', 'id_submitted', 'approved', 'rejected', 'verified', 'submitted'.
+-- 2. Update public.is_approved_student() so that students with 'id_submitted'
+--    can use core UniFetch V2 functionality immediately after uploading their ID,
+--    while preserving deactivation checks and role boundaries.
+-- 3. Maintain strict privilege protection: students cannot self-promote to 'approved',
+--    self-grant admin role, or alter credits.
+--
+-- Safety:
+-- - Non-destructive: No tables or columns are dropped.
+-- - All 52 existing user profiles and their statuses remain intact.
+-- - Fully idempotent and safe to re-run.
+-- ==============================================================================
+
+-- STEP 1: Update profiles_verification_status_check constraint
+DO $$
+BEGIN
+  -- Drop existing constraint if present
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conrelid = 'public.profiles'::regclass
+      AND conname = 'profiles_verification_status_check'
+  ) THEN
+    ALTER TABLE public.profiles DROP CONSTRAINT profiles_verification_status_check;
+  END IF;
+
+  -- Add updated check constraint supporting the full V2 verification lifecycle
+  ALTER TABLE public.profiles ADD CONSTRAINT profiles_verification_status_check
+    CHECK (verification_status IN ('pending', 'id_submitted', 'approved', 'rejected', 'verified', 'submitted'));
+END $$;
+
+
+-- STEP 2: Update public.is_approved_student()
+-- Evaluates whether the currently authenticated student is eligible for core V2 flows.
+-- Allowed statuses: 'approved', 'verified', 'id_submitted' (or admin role).
+-- Enforces account active status (status <> 'deactivated').
+CREATE OR REPLACE FUNCTION public.is_approved_student()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() 
+      AND (
+        verification_status IN ('approved', 'verified', 'id_submitted')
+        OR role = 'admin'
+      )
+      AND status <> 'deactivated'
+  );
+END;
+$$;
+
+
+-- STEP 3: Ensure protect_profile_privileged_columns() enforces strict security boundaries
+-- Ensures regular students can only set verification_status to 'id_submitted' or 'pending'
+-- and CANNOT grant themselves 'approved', 'verified', 'rejected', or change role/credits.
+CREATE OR REPLACE FUNCTION public.protect_profile_privileged_columns()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  -- System triggers or internal calls without auth session bypass checks
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  -- Administrators have full management rights
+  IF public.is_admin() THEN
+    RETURN NEW;
+  END IF;
+
+  -- Allow internal balance changes during payout workflows
+  IF current_setting('unifetch.allow_credit_payout', true) = 'true' THEN
+    RETURN NEW;
+  END IF;
+
+  -- Non-admin users can never alter role or credits
+  IF NEW.role IS DISTINCT FROM OLD.role
+     OR NEW.credits IS DISTINCT FROM OLD.credits THEN
+    RAISE EXCEPTION 'Permission denied: role and credits can only be changed by an admin';
+  END IF;
+
+  -- Non-admin users may set verification_status to 'id_submitted' or 'pending', but never 'approved' / 'verified' / 'rejected'
+  IF NEW.verification_status IS DISTINCT FROM OLD.verification_status
+     AND NEW.verification_status NOT IN ('pending', 'submitted', 'id_submitted') THEN
+    RAISE EXCEPTION 'Permission denied: only an admin can verify or reject a student ID';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+-- Ensure trigger is active on public.profiles
+DROP TRIGGER IF EXISTS protect_profile_privileged_columns_trg ON public.profiles;
+CREATE TRIGGER protect_profile_privileged_columns_trg
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.protect_profile_privileged_columns();

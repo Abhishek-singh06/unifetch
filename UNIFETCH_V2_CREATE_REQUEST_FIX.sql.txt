@@ -1,0 +1,71 @@
+-- ==============================================================================
+-- UNIFETCH V2 - CREATE_PACKAGE_REQUEST CREDIT DEDUCTION FIX
+-- The protect_profile_privileged_columns trigger blocks credit changes by
+-- non-admins unless unifetch.allow_credit_payout = 'true' is set in session.
+-- create_package_request must set this config before deducting credits.
+-- Idempotent and non-destructive.
+-- ==============================================================================
+
+DROP FUNCTION IF EXISTS public.create_package_request(text, text, text, timestamptz);
+
+CREATE OR REPLACE FUNCTION public.create_package_request(
+  p_package_description TEXT,
+  p_pickup_location TEXT,
+  p_delivery_location TEXT,
+  p_pickup_time TIMESTAMPTZ
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_request_id UUID;
+  v_otp TEXT;
+  v_requester_credits INTEGER;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF NOT public.is_approved_student() THEN
+    RAISE EXCEPTION 'User not approved to create package requests';
+  END IF;
+
+  SELECT credits INTO v_requester_credits
+  FROM public.profiles
+  WHERE id = auth.uid()
+  FOR UPDATE;
+
+  IF v_requester_credits < 50 THEN
+    RAISE EXCEPTION 'Insufficient credits. You need at least 50 credits to make a request.';
+  END IF;
+
+  -- Allow this SECURITY DEFINER function to update credits despite the trigger guard
+  PERFORM set_config('unifetch.allow_credit_payout', 'true', false);
+
+  UPDATE public.profiles
+  SET credits = credits - 50, updated_at = NOW()
+  WHERE id = auth.uid();
+
+  -- Reset the flag after the deduction
+  PERFORM set_config('unifetch.allow_credit_payout', 'false', false);
+
+  INSERT INTO public.package_requests (
+    requester_id, package_description, pickup_location, delivery_location, pickup_time, status
+  )
+  VALUES (
+    auth.uid(), p_package_description, p_pickup_location, p_delivery_location, p_pickup_time, 'pending'
+  )
+  RETURNING id INTO v_request_id;
+
+  v_otp := LPAD(FLOOR(RANDOM() * 1000000)::TEXT, 6, '0');
+
+  INSERT INTO public.request_otps (request_id, otp)
+  VALUES (v_request_id, v_otp);
+
+  RETURN v_request_id;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.create_package_request(text, text, text, timestamptz) TO authenticated;

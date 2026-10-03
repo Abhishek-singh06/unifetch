@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { MessageSquare, PlusCircle } from "lucide-react";
 import { useTransition, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, getDemoOutsideRequests } from "@/lib/demoSession";
 import { SidebarShell } from "../../components/SidebarShell";
 import { Alert } from "../../components/ui/Alert";
 import { StatPill } from "../../components/ui/StatPill";
@@ -41,6 +42,21 @@ export default function MyOutsideTasksPage() {
 
     async function loadData() {
       setErrorMessage("");
+
+      if (isDemoMode()) {
+        const demoUser = getDemoUser();
+        const demoReqs = getDemoOutsideRequests();
+        const requests = (demoReqs as unknown as OutsideRequest[]).filter(
+          (r) => r.requester_id === demoUser.id
+        );
+        const carries = (demoReqs as unknown as OutsideRequest[]).filter(
+          (r) => r.carrier_id === demoUser.id
+        );
+        setMyRequests(requests);
+        setMyCarries(carries);
+        setLoading(false);
+        return;
+      }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -83,6 +99,8 @@ export default function MyOutsideTasksPage() {
     }
 
     loadData();
+
+    if (isDemoMode()) return;
 
     const channel = supabase
       .channel("outside-tasks-channel")
@@ -156,10 +174,10 @@ export default function MyOutsideTasksPage() {
               </span>
             </div>
             <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
-              Outside Tasks Dashboard
+              My Outside Tasks
             </h1>
             <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
-              Track requests you posted or claimed for destinations outside college campus.
+              Track the outside campus tasks you requested or accepted.
             </p>
           </div>
 
@@ -186,7 +204,7 @@ export default function MyOutsideTasksPage() {
 
           {myRequests.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[rgba(255,255,255,0.08)] p-10 text-center text-xs text-muted font-bold uppercase tracking-widest select-none">
-              You haven&apos;t posted any outside campus requests yet
+              No outside requests yet. Need something from the city?
             </div>
           ) : (
             <div className="grid gap-6 md:grid-cols-2">
@@ -245,11 +263,11 @@ export default function MyOutsideTasksPage() {
 
         {/* Section 2: My Accepted Carries */}
         <div className="space-y-6">
-          <h2 className="font-display text-xl font-bold text-white border-b border-[rgba(255,255,255,0.05)] pb-3">Tasks I Accepted</h2>
+          <h2 className="font-display text-xl font-bold text-white border-b border-[rgba(255,255,255,0.05)] pb-3">Carries I Accepted</h2>
 
           {myCarries.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-[rgba(255,255,255,0.08)] p-10 text-center text-xs text-muted font-bold uppercase tracking-widest select-none">
-              You haven&apos;t claimed any outside campus tasks yet
+              No accepted carries yet. Browse trips and offer to help.
             </div>
           ) : (
             <div className="grid gap-6 md:grid-cols-2">

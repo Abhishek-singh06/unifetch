@@ -1,0 +1,203 @@
+-- UNIFETCH V2 DATABASE VERIFICATION SCRIPT (STRICTLY READ-ONLY)
+-- Run this in Supabase SQL Editor after running UNIFETCH_SUPABASE_FINAL_MIGRATION.sql.txt.
+-- None of these queries modify, alter, or delete any data.
+
+-- 1. VERIFY REQUIRED TABLES EXIST
+SELECT
+  table_name,
+  EXISTS (
+    SELECT 1 FROM information_schema.tables 
+    WHERE table_schema = 'public' AND table_name = req_tables.table_name
+  ) AS exists
+FROM (
+  VALUES
+    ('profiles'),
+    ('package_requests'),
+    ('request_otps'),
+    ('credit_purchases'),
+    ('outside_trips'),
+    ('outside_requests'),
+    ('outside_messages'),
+    ('broadcasts'),
+    ('reviews'),
+    ('payment_settings'),
+    ('notifications'),
+    ('notification_preferences'),
+    ('reports'),
+    ('blocks')
+) AS req_tables(table_name)
+ORDER BY table_name;
+
+
+-- 2. VERIFY REQUIRED COLUMNS ON KEY TABLES
+SELECT
+  table_name,
+  column_name,
+  data_type,
+  is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND (
+    (table_name = 'profiles' AND column_name IN ('id', 'id_card_url', 'id_card_submitted_at', 'verification_status', 'role', 'credits', 'status', 'hostel'))
+    OR (table_name = 'package_requests' AND column_name IN ('id', 'status', 'otp_verified', 'delivered_at', 'carrier_id', 'requester_id'))
+    OR (table_name = 'request_otps' AND column_name IN ('request_id', 'otp'))
+    OR (table_name = 'credit_purchases' AND column_name IN ('id', 'user_id', 'credits', 'amount_inr', 'payment_reference', 'payment_proof_url', 'status', 'rejection_reason'))
+    OR (table_name = 'outside_trips' AND column_name IN ('id', 'creator_id', 'origin', 'destination', 'departure_date', 'status'))
+    OR (table_name = 'outside_requests' AND column_name IN ('id', 'requester_id', 'carrier_id', 'trip_id', 'request_type', 'destination', 'description', 'status', 'payment_status', 'payment_qr_url', 'contact_shared'))
+    OR (table_name = 'outside_messages' AND column_name IN ('id', 'request_id', 'sender_id', 'content', 'is_system', 'proposal_amount', 'proposal_status'))
+    OR (table_name = 'payment_settings' AND column_name IN ('id', 'upi_id', 'qr_image_path'))
+    OR (table_name = 'broadcasts' AND column_name IN ('id', 'creator_id', 'message', 'destination', 'category', 'status'))
+    OR (table_name = 'reviews' AND column_name IN ('id', 'reviewer_id', 'reviewee_id', 'request_type', 'request_id', 'rating', 'comment'))
+  )
+ORDER BY table_name, column_name;
+
+
+-- 3. VERIFY REQUIRED INDEXES EXIST
+SELECT
+  tablename,
+  indexname,
+  indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND tablename IN (
+    'broadcasts', 'reviews', 'notifications', 'credit_purchases',
+    'outside_requests', 'outside_trips', 'outside_messages'
+  )
+ORDER BY tablename, indexname;
+
+
+-- 4. VERIFY ROW LEVEL SECURITY (RLS) IS ENABLED ON ALL TABLES
+SELECT
+  relname AS table_name,
+  relrowsecurity AS rls_enabled
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE n.nspname = 'public'
+  AND relname IN (
+    'profiles', 'package_requests', 'request_otps', 'credit_purchases',
+    'outside_trips', 'outside_requests', 'outside_messages',
+    'broadcasts', 'reviews', 'payment_settings', 'notifications',
+    'notification_preferences', 'reports', 'blocks'
+  )
+ORDER BY table_name;
+
+
+-- 5. VERIFY RLS POLICIES EXIST ON EACH TABLE
+SELECT
+  tablename,
+  policyname,
+  cmd,
+  roles
+FROM pg_policies
+WHERE schemaname = 'public'
+ORDER BY tablename, policyname;
+
+
+-- 6. VERIFY REQUIRED RPCs, ARGUMENTS, AND RETURN TYPES
+SELECT 
+  p.proname AS function_name,
+  pg_get_function_arguments(p.oid) AS argument_signature,
+  t.typname AS return_type,
+  p.prosecdef AS is_security_definer
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+JOIN pg_type t ON t.oid = p.prorettype
+WHERE n.nspname = 'public'
+  AND p.proname IN (
+    'is_admin',
+    'is_approved_student',
+    'check_user_status',
+    'protect_profile_privileged_columns',
+    'handle_new_user',
+    'create_package_request',
+    'claim_package_request',
+    'get_my_request_otp',
+    'verify_package_otp',
+    'buy_credits',
+    'approve_credit_purchase',
+    'reject_credit_purchase',
+    'protect_outside_request_transitions',
+    'handle_outside_request_status_change',
+    'claim_outside_request',
+    'propose_outside_reward',
+    'accept_outside_reward',
+    'set_outside_payment_qr',
+    'mark_outside_payment_sent',
+    'confirm_outside_payment_received',
+    'start_outside_task',
+    'complete_outside_task',
+    'cancel_outside_request',
+    'share_outside_contact',
+    'handle_new_user_preferences',
+    'trg_package_request_notifications',
+    'trg_outside_request_notifications',
+    'trg_outside_message_notifications',
+    'trg_credit_purchase_notifications',
+    'trg_review_notifications',
+    'set_updated_at'
+  )
+ORDER BY p.proname;
+
+
+-- 7. VERIFY DATABASE TRIGGERS EXIST
+SELECT
+  event_object_table AS table_name,
+  trigger_name,
+  event_manipulation AS event,
+  action_statement
+FROM information_schema.triggers
+WHERE trigger_schema = 'public'
+  AND trigger_name IN (
+    'protect_profile_privileged_columns_trg',
+    'on_auth_user_created',
+    'trg_create_user_preferences',
+    'trg_package_request_notifications',
+    'trg_outside_request_notifications',
+    'trg_outside_message_notifications',
+    'trg_credit_purchase_notifications',
+    'trg_review_notifications',
+    'trg_broadcasts_updated_at',
+    'protect_outside_request_transitions_trg',
+    'trg_outside_status_change',
+    'trg_check_status_package_requests',
+    'trg_check_status_outside_requests'
+  )
+ORDER BY event_object_table, trigger_name;
+
+
+-- 8. VERIFY STORAGE BUCKETS CONFIGURATION
+SELECT
+  id,
+  name,
+  public,
+  created_at
+FROM storage.buckets
+WHERE id IN ('student-ids', 'payment-proofs', 'payment-settings', 'outside-delivery')
+ORDER BY id;
+
+
+-- 9. VERIFY STORAGE RLS POLICIES
+SELECT
+  policyname,
+  cmd,
+  roles
+FROM pg_policies
+WHERE schemaname = 'storage'
+  AND tablename = 'objects'
+  AND policyname ILIKE ANY (ARRAY[
+    '%student%', '%payment%', '%outside%'
+  ])
+ORDER BY policyname;
+
+
+-- 10. VERIFY SUPABASE REALTIME PUBLICATION TABLES
+SELECT
+  tablename
+FROM pg_publication_tables
+WHERE pubname = 'supabase_realtime'
+  AND schemaname = 'public'
+  AND tablename IN (
+    'package_requests', 'outside_requests', 'outside_messages',
+    'outside_trips', 'broadcasts', 'reviews', 'notifications'
+  )
+ORDER BY tablename;

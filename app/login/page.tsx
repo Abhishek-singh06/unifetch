@@ -6,6 +6,7 @@ import { FormEvent, useState } from "react";
 import { ShieldCheck, Quote, ArrowRight, Mail, Lock } from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { disableDemoMode } from "@/lib/demoSession";
 import { Button } from "../components/ui/Button";
 import { Field } from "../components/ui/Field";
 import { Alert } from "../components/ui/Alert";
@@ -45,7 +46,7 @@ export default function LoginPage() {
 
     const { data: profile, error: profileError } = await supabase
       .from("profiles")
-      .select("verification_status, college_id_url")
+      .select("verification_status, college_id_url, status")
       .eq("id", loginData.user.id)
       .single();
 
@@ -56,7 +57,21 @@ export default function LoginPage() {
       return;
     }
 
-    if (profile.verification_status === "approved") {
+    if (profile.status === "deactivated") {
+      await supabase.auth.signOut();
+      setErrorMessage("This account has been deactivated.");
+      setIsLoading(false);
+      return;
+    }
+
+    disableDemoMode();
+
+    if (
+      profile.verification_status === "approved" ||
+      profile.verification_status === "verified" ||
+      profile.verification_status === "submitted" ||
+      profile.verification_status === "id_submitted"
+    ) {
       router.push("/");
       router.refresh();
       return;

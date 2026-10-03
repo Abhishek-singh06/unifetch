@@ -5,10 +5,13 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { ShieldCheck, Info, CheckCircle } from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, addDemoPackage } from "@/lib/demoSession";
 import { SidebarShell } from "../components/SidebarShell";
 import { Button } from "../components/ui/Button";
 import { Field, Select } from "../components/ui/Field";
 import { Alert } from "../components/ui/Alert";
+import TrialRestrictedModal from "../components/ui/TrialRestrictedModal";
+import PendingVerificationModal from "../components/ui/PendingVerificationModal";
 
 const packageCategories = [
   { id: "amazon", label: "Amazon / Flipkart", icon: "📦", placeholder: "e.g. Noise Smartwatch box" },
@@ -42,6 +45,8 @@ export default function RequestPackagePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [showTrialModal, setShowTrialModal] = useState(false);
+  const [showPendingModal, setShowPendingModal] = useState(false);
 
   const pickupTimeRef = useRef<HTMLInputElement>(null);
 
@@ -49,6 +54,28 @@ export default function RequestPackagePage() {
     const d = new Date(Date.now() + 60 * 60 * 1000);
     d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
     return d.toISOString().slice(0, 16);
+  }
+
+  function handleTrialContinueSimulate() {
+    setShowTrialModal(false);
+    const timeValue = pickupTime || getDefaultTime();
+    const finalDelivery = roomNumber.trim()
+      ? `${deliveryLocation} • Room ${roomNumber.trim()}`
+      : deliveryLocation;
+    const fullDescription = `[${category.toUpperCase()}] ${packageDescription.trim() || packageCategories.find(c => c.id === category)?.placeholder}`;
+
+    addDemoPackage({
+      package_description: fullDescription,
+      pickup_location: pickupLocation,
+      delivery_location: finalDelivery,
+      pickup_time: new Date(timeValue).toISOString(),
+    });
+
+    setMessage("🎉 [Demo Simulation] Sample package request created!");
+    setTimeout(() => {
+      router.push("/requests");
+      router.refresh();
+    }, 800);
   }
 
   useEffect(() => {
@@ -62,6 +89,12 @@ export default function RequestPackagePage() {
 
     setMessage("");
     setErrorMessage("");
+
+    if (isDemoMode()) {
+      setShowTrialModal(true);
+      return;
+    }
+
     setIsLoading(true);
 
     const {
@@ -71,6 +104,24 @@ export default function RequestPackagePage() {
     if (!user) {
       setErrorMessage("Please sign in before requesting a package.");
       setIsLoading(false);
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("verification_status")
+      .eq("id", user.id)
+      .single();
+
+    if (
+      profile &&
+      profile.verification_status !== "approved" &&
+      profile.verification_status !== "verified" &&
+      profile.verification_status !== "submitted" &&
+      profile.verification_status !== "id_submitted"
+    ) {
+      setIsLoading(false);
+      setShowPendingModal(true);
       return;
     }
 
@@ -127,19 +178,23 @@ export default function RequestPackagePage() {
         
         {/* Title area */}
         <div className="border-b border-[rgba(255,255,255,0.08)] pb-6">
-          <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">New Delivery Job</span>
+          <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Within College</span>
           <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
-            Request Gate Pickup
+            Create Campus Request
           </h1>
           <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
-            Fill out the details of your package waiting at the campus gate.
+            Ask another student to carry something for you. Costs 50 Credits.
           </p>
         </div>
 
         <div className="grid gap-8 lg:grid-cols-[1.5fr_1fr] items-start">
           {/* Left Form Card */}
           <animated.div style={formCardSpring}>
-            <div className="rounded-[2rem] border border-[rgba(255,255,255,0.08)] p-6 sm:p-8 bg-[#080d16]/40 backdrop-blur-sm">
+            <div className="rounded-[2rem] border border-[rgba(255,255,255,0.08)] p-6 sm:p-8 bg-[#080d16]/40 backdrop-blur-sm space-y-6">
+              <div className="flex items-center gap-2.5 p-3.5 rounded-xl bg-[#2563eb]/8 border border-[#2563eb]/20 text-xs font-bold text-[#cbd5e1]">
+                <span>🪙</span>
+                <span>Creating a request costs 50 Credits. You&apos;ll earn them back by carrying for others.</span>
+              </div>
               <form onSubmit={handleSubmit} className="space-y-6">
                 
                 {/* Category selector */}
@@ -257,7 +312,7 @@ export default function RequestPackagePage() {
                 </h3>
               </div>
               <p className="mt-3 text-xs leading-relaxed text-[#cbd5e1] font-semibold">
-                UniFetch generates a private 6-digit verification key for every errand request. Share this key with the carrier only when you inspect the package at your hostel.
+                A private 6-digit code is generated for your request. Share it with the carrier only after they hand over your item.
               </p>
               
               <div className="mt-5 rounded-2xl border border-[rgba(255,255,255,0.08)] bg-[#05070b]/80 p-4.5 text-center shadow-sm">
@@ -294,6 +349,18 @@ export default function RequestPackagePage() {
         </div>
 
       </div>
+
+      <TrialRestrictedModal
+        isOpen={showTrialModal}
+        onClose={handleTrialContinueSimulate}
+        actionName="Post Delivery Request"
+      />
+
+      <PendingVerificationModal
+        isOpen={showPendingModal}
+        onClose={() => setShowPendingModal(false)}
+        actionName="Post Delivery Request"
+      />
     </SidebarShell>
   );
 }

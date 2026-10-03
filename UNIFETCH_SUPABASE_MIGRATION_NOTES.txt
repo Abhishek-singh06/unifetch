@@ -1,0 +1,126 @@
+DOCUMENTATION ONLY - DO NOT RUN IN SUPABASE SQL EDITOR
+------------------------------------------------------------------------------
+This file contains human-readable audit notes and explanations.
+To run the database migration, use: UNIFETCH_SUPABASE_FINAL_MIGRATION.sql.txt
+To verify the database after migration, use: UNIFETCH_SUPABASE_VERIFICATION.sql.txt
+------------------------------------------------------------------------------
+
+UNIFETCH V2 SUPABASE MIGRATION NOTES & AUDIT REPORT
+
+1. ROOT CAUSE OF "ERROR: 42P13: no language specified"
+------------------------------------------------------------------------------
+During the addition of DROP FUNCTION statements, an accidental duplicate line was
+introduced immediately preceding confirm_outside_payment_received:
+  CREATE OR REPLACE FUNCTION public.confirm_outside_payment_received(uuid);
+This statement had no argument names, no return type, no LANGUAGE specification, and no body.
+When the Supabase SQL Editor evaluated this statement, PostgreSQL halted with:
+  ERROR: 42P13: no language specified
+
+Fix applied:
+- The rogue duplicate statement was completely removed.
+- All 31 functions in UNIFETCH_SUPABASE_FINAL_MIGRATION.sql.txt were audited.
+- Every function now explicitly declares:
+    LANGUAGE plpgsql
+    SECURITY DEFINER (where appropriate)
+    SET search_path = public
+  and ends cleanly with:
+    $$;
+
+
+2. ROOT CAUSE OF "ERROR: 42601: operator too long at or near '================'"
+------------------------------------------------------------------------------
+In PostgreSQL, raw sequences of '=' or '-' characters without the leading '-- ' comment
+prefix are parsed as user-defined operator symbols. When a line like
+==============================================================================
+is evaluated by PostgreSQL, it fails with:
+  ERROR: 42601: operator too long at or near "================"
+
+Fix applied:
+- All raw '===' and '---' decorative separator lines have been eliminated from both
+  UNIFETCH_SUPABASE_FINAL_MIGRATION.sql.txt and UNIFETCH_SUPABASE_VERIFICATION.sql.txt.
+- Every section heading is now a clean, single-line SQL comment beginning strictly with '-- '.
+- Zero un-commented plain text exists in either executable SQL file.
+
+
+3. CONFIRMATION OF PREVIOUS FIXES
+------------------------------------------------------------------------------
+A. buy_credits Return Type Conflict (ERROR 42P13):
+   - PostgreSQL prohibits CREATE OR REPLACE FUNCTION from altering return types (e.g. from
+     legacy BOOLEAN / VOID to V2 UUID).
+   - Resolved with explicit DROP FUNCTION IF EXISTS public.buy_credits(integer, text, text);
+     and argument variations before defining the V2 UUID-returning function.
+
+B. outside_trips.traveler_id Does Not Exist (ERROR 42703):
+   - The canonical column in supabase_schema.sql and the V2 frontend (app/outside/browse/page.tsx
+     and app/outside/trips/create/page.tsx) is `creator_id`.
+   - All references to traveler_id have been eliminated.
+   - ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS creator_id UUID ... was added
+     to guarantee existing tables have the column before RLS policies run.
+
+C. Schema Alignment for Outside Tasks & Messages:
+   - outside_messages uses canonical `is_system BOOLEAN NOT NULL DEFAULT FALSE` matching
+     app/outside/[id]/page.tsx.
+   - outside_requests has all columns safely ensured via ALTER TABLE ... ADD COLUMN IF NOT EXISTS
+     (including trip_id, final_reward, payment_status, contact_shared, etc.).
+
+
+4. FUNCTION AUDIT SUMMARY
+------------------------------------------------------------------------------
+Total functions audited: 31
+All 31 functions have explicit LANGUAGE plpgsql, SET search_path = public, and balanced $$ blocks:
+
+Core & Security Functions (6):
+1. public.set_updated_at() -> RETURNS TRIGGER (LANGUAGE plpgsql)
+2. public.is_admin() -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+3. public.is_approved_student() -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+4. public.check_user_status() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+5. public.protect_profile_privileged_columns() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+6. public.handle_new_user() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+
+Package Requests & Credits RPCs (7):
+7. public.create_package_request(...) -> RETURNS UUID (LANGUAGE plpgsql, SECURITY DEFINER)
+8. public.claim_package_request(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+9. public.get_my_request_otp(...) -> RETURNS TEXT (LANGUAGE plpgsql, SECURITY DEFINER)
+10. public.verify_package_otp(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+11. public.buy_credits(...) -> RETURNS UUID (LANGUAGE plpgsql, SECURITY DEFINER)
+12. public.approve_credit_purchase(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+13. public.reject_credit_purchase(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+
+Outside Delivery RPCs (10):
+14. public.claim_outside_request(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+15. public.propose_outside_reward(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+16. public.accept_outside_reward(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+17. public.set_outside_payment_qr(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+18. public.mark_outside_payment_sent(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+19. public.confirm_outside_payment_received(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+20. public.start_outside_task(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+21. public.complete_outside_task(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+22. public.cancel_outside_request(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+23. public.share_outside_contact(...) -> RETURNS BOOLEAN (LANGUAGE plpgsql, SECURITY DEFINER)
+
+Trigger Functions (8):
+24. public.protect_outside_request_transitions() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+25. public.handle_outside_request_status_change() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+26. public.handle_new_user_preferences() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+27. public.trg_package_request_notifications() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+28. public.trg_outside_request_notifications() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+29. public.trg_outside_message_notifications() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+30. public.trg_credit_purchase_notifications() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+31. public.trg_review_notifications() -> RETURNS TRIGGER (LANGUAGE plpgsql, SECURITY DEFINER)
+
+
+5. DATA SAFETY CONFIRMATION
+------------------------------------------------------------------------------
+- ZERO destructive operations: No DROP TABLE, no DROP COLUMN, no TRUNCATE, no DELETE.
+- `package_requests.pickup_otp` is preserved and safely backfilled into `request_otps`.
+- Existing profiles and account balances are completely untouched.
+
+
+6. EXECUTION INSTRUCTIONS
+------------------------------------------------------------------------------
+1. Open UNIFETCH_SUPABASE_FINAL_MIGRATION.sql.txt.
+2. Copy its entire content.
+3. Paste into Supabase Dashboard -> SQL Editor -> New Query.
+4. Click "Run".
+5. Open UNIFETCH_SUPABASE_VERIFICATION.sql.txt, copy its content, paste in SQL Editor,
+   and click "Run" to verify all 14 tables, columns, RLS policies, and all 31 functions/RPCs.

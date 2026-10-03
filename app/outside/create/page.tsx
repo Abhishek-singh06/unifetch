@@ -5,10 +5,13 @@ import { FormEvent, useState, useEffect, Suspense } from "react";
 import { DollarSign } from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, addDemoOutsideRequest } from "@/lib/demoSession";
 import { SidebarShell } from "../../components/SidebarShell";
 import { Button } from "../../components/ui/Button";
 import { Field, Select } from "../../components/ui/Field";
 import { Alert } from "../../components/ui/Alert";
+import TrialRestrictedModal from "../../components/ui/TrialRestrictedModal";
+import PendingVerificationModal from "../../components/ui/PendingVerificationModal";
 
 const requestTypes = [
   { id: "buy", label: "Buy something", icon: "🛒" },
@@ -47,6 +50,32 @@ function CreateOutsideRequestForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [showTrialModal, setShowTrialModal] = useState(false);
+  const [showPendingModal, setShowPendingModal] = useState(false);
+
+  function handleTrialContinueSimulate() {
+    setShowTrialModal(false);
+    const reward = parseInt(suggestedReward, 10) || 50;
+    const finalDestination = destinationPreset === "Custom Location" 
+      ? customDestination.trim() 
+      : destinationPreset;
+    const dateVal = preferredDate ? new Date(preferredDate) : new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+    const demoReq = addDemoOutsideRequest({
+      request_type: requestType,
+      destination: finalDestination || "City Market",
+      description: description.trim() || "Sample item purchase",
+      preferred_date: dateVal.toISOString(),
+      instructions: instructions.trim(),
+      suggested_reward: reward,
+    });
+
+    setMessage("🎉 [Demo Simulation] Outside request created with sample data!");
+    setTimeout(() => {
+      router.push(`/outside/${demoReq.id}`);
+      router.refresh();
+    }, 800);
+  }
 
   useEffect(() => {
     void (async () => {
@@ -65,6 +94,12 @@ function CreateOutsideRequestForm() {
     event.preventDefault();
     setMessage("");
     setErrorMessage("");
+
+    if (isDemoMode()) {
+      setShowTrialModal(true);
+      return;
+    }
+
     setIsLoading(true);
 
     const { data: { user } } = await supabase.auth.getUser();
@@ -73,6 +108,26 @@ function CreateOutsideRequestForm() {
       setIsLoading(false);
       return;
     }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("verification_status")
+      .eq("id", user.id)
+      .single();
+
+    if (
+      profile &&
+      profile.verification_status !== "approved" &&
+      profile.verification_status !== "verified" &&
+      profile.verification_status !== "submitted" &&
+      profile.verification_status !== "id_submitted"
+    ) {
+      setIsLoading(false);
+      setShowPendingModal(true);
+      return;
+    }
+
+    const userId = user.id;
 
     const reward = parseInt(suggestedReward, 10);
     if (isNaN(reward) || reward <= 0) {
@@ -101,7 +156,7 @@ function CreateOutsideRequestForm() {
     const { data, error } = await supabase
       .from("outside_requests")
       .insert({
-        requester_id: user.id,
+        requester_id: userId,
         request_type: requestType,
         destination: finalDestination,
         description: description.trim(),
@@ -145,10 +200,10 @@ function CreateOutsideRequestForm() {
         <div className="border-b border-[rgba(255,255,255,0.08)] pb-6">
           <span className="text-xs font-bold uppercase tracking-widest text-[#10b981]">Outside Campus</span>
           <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
-            Request Outside Carry &amp; Drop
+            Ask for Help Outside Campus
           </h1>
           <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
-            Post tasks for students heading outside the campus. Negotiate reward directly in real money.
+            Someone heading your way can bring, buy, return, or pick up something for you.
           </p>
         </div>
 
@@ -252,7 +307,7 @@ function CreateOutsideRequestForm() {
                 {/* Suggested Reward */}
                 <div>
                   <label htmlFor="suggestedReward" className="field-label">
-                    6. Suggested Cash Reward (₹ - Negotiable)
+                    6. Starting Offer (₹ INR – Negotiable)
                   </label>
                   <div className="relative rounded-2xl shadow-sm max-w-[200px]">
                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -269,7 +324,7 @@ function CreateOutsideRequestForm() {
                     />
                   </div>
                   <span className="text-[10px] text-muted block mt-1.5 font-bold uppercase tracking-wider">
-                    Note: This is an starting offer. You can negotiate the final price with the carrier in the chat.
+                    This is your starting offer. You can negotiate the final amount with the carrier in the chat. Typical rewards: ₹50–₹150.
                   </span>
                 </div>
 
@@ -282,7 +337,7 @@ function CreateOutsideRequestForm() {
                   disabled={isLoading}
                   className="w-full flex items-center justify-center gap-1.5 uppercase tracking-wider text-xs font-bold py-3.5 mt-2 bg-[#10b981] hover:bg-[#059669] shadow-glow-emerald text-white border-none"
                 >
-                  <span>{isLoading ? "Publishing Request..." : "Publish Outside Request"}</span>
+                  <span>{isLoading ? "Publishing Request..." : "Post Request"}</span>
                 </Button>
               </form>
             </div>
@@ -316,6 +371,19 @@ function CreateOutsideRequestForm() {
           </div>
         </div>
       </div>
+
+      <TrialRestrictedModal
+        isOpen={showTrialModal}
+        onClose={handleTrialContinueSimulate}
+        actionName="Post Outside Delivery Request"
+        description="Trial users can prepare outside requests and explore real-money errands, but matching with campus carriers and transacting via UPI requires a verified account."
+      />
+
+      <PendingVerificationModal
+        isOpen={showPendingModal}
+        onClose={() => setShowPendingModal(false)}
+        actionName="Post Outside Delivery Request"
+      />
     </SidebarShell>
   );
 }

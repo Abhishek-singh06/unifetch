@@ -6,12 +6,15 @@ import { useRouter } from "next/navigation";
 import { Search, Filter, Calendar, ArrowRight, ExternalLink, CheckCircle } from "lucide-react";
 import { useTransition, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, getDemoPackages, claimDemoPackage } from "@/lib/demoSession";
 import { SidebarShell } from "../components/SidebarShell";
 import { Button } from "../components/ui/Button";
 import { Alert } from "../components/ui/Alert";
 import { EmptyState } from "../components/ui/EmptyState";
 import { StatPill } from "../components/ui/StatPill";
 import { StatusBadge } from "../components/ui/StatusBadge";
+import TrialRestrictedModal from "../components/ui/TrialRestrictedModal";
+import PendingVerificationModal from "../components/ui/PendingVerificationModal";
 
 type PackageRequest = {
   id: string;
@@ -36,12 +39,40 @@ export default function CarryPackagePage() {
   const [filterGate, setFilterGate] = useState("all");
   const [errorMessage, setErrorMessage] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [showTrialModal, setShowTrialModal] = useState(false);
+  const [pendingClaimId, setPendingClaimId] = useState("");
+  const [showPendingModal, setShowPendingModal] = useState(false);
+
+  function handleTrialContinueSimulate() {
+    setShowTrialModal(false);
+    if (!pendingClaimId) return;
+    claimDemoPackage(pendingClaimId);
+    setSuccessMessage("🎉 [Demo Simulation] Package claimed! Redirecting to sample OTP page...");
+    setTimeout(() => {
+      router.push(`/deliver/${pendingClaimId}`);
+    }, 800);
+  }
 
   useEffect(() => {
     let cancelled = false;
 
     async function loadData() {
       setErrorMessage("");
+
+      if (isDemoMode()) {
+        const demoUser = getDemoUser();
+        const demoPkgs = getDemoPackages();
+        const available = (demoPkgs as unknown as PackageRequest[]).filter(
+          (p) => p.status === "pending" && p.carrier_id !== demoUser.id
+        );
+        const deliveries = (demoPkgs as unknown as PackageRequest[]).filter(
+          (p) => p.carrier_id === demoUser.id
+        );
+        setAvailableRequests(available);
+        setMyDeliveries(deliveries);
+        setLoading(false);
+        return;
+      }
 
       const {
         data: { user },
@@ -91,6 +122,8 @@ export default function CarryPackagePage() {
 
     loadData();
 
+    if (isDemoMode()) return;
+
     const channel = supabase
       .channel("carry-packages-channel")
       .on(
@@ -115,6 +148,13 @@ export default function CarryPackagePage() {
   async function handleClaim(requestId: string) {
     setErrorMessage("");
     setSuccessMessage("");
+
+    if (isDemoMode()) {
+      setPendingClaimId(requestId);
+      setShowTrialModal(true);
+      return;
+    }
+
     setClaimingId(requestId);
 
     const {
@@ -123,6 +163,24 @@ export default function CarryPackagePage() {
 
     if (!user) {
       router.push("/login");
+      return;
+    }
+
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("verification_status")
+      .eq("id", user.id)
+      .single();
+
+    if (
+      profile &&
+      profile.verification_status !== "approved" &&
+      profile.verification_status !== "verified" &&
+      profile.verification_status !== "submitted" &&
+      profile.verification_status !== "id_submitted"
+    ) {
+      setClaimingId("");
+      setShowPendingModal(true);
       return;
     }
 
@@ -201,14 +259,14 @@ export default function CarryPackagePage() {
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Within College</span>
               <span className="text-[9px] bg-[#2563eb]/15 text-primary border border-[#2563eb]/30 px-2.5 py-0.5 rounded-full font-extrabold uppercase tracking-wider">
-                Payment Type: UniFetch Credits
+                CREDITS ONLY • NO CASH
               </span>
             </div>
             <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
-              Carry & Earn Campus Credits
+              Carry for Campus Credits
             </h1>
             <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
-              Select student parcels waiting at campus gates and drop them at hostel lobbies.
+              Pick up things other students need carried and earn +35 Credits on each delivery.
             </p>
           </div>
 
@@ -228,7 +286,7 @@ export default function CarryPackagePage() {
           <div className="space-y-6">
             <div className="border-b border-[rgba(255,255,255,0.08)] pb-3 flex items-center justify-between">
               <h2 className="font-display text-xl font-bold text-white flex items-center gap-2.5">
-                <span>Available Packages</span>
+                <span>Open Requests</span>
                 <span className="rounded-full bg-white/5 text-[#cbd5e1] text-xs font-bold px-2.5 py-0.5 border border-[rgba(255,255,255,0.08)]">
                   {filteredRequests.length}
                 </span>
@@ -330,13 +388,13 @@ export default function CarryPackagePage() {
           <aside className="space-y-6 lg:sticky lg:top-[85px]">
             <div className="border-b border-[rgba(255,255,255,0.08)] pb-3">
               <h2 className="font-display text-xl font-bold text-white flex items-center gap-2">
-                <span>My Claimed Runs</span>
+                <span>My Active Deliveries</span>
               </h2>
             </div>
 
             {myDeliveries.length === 0 ? (
               <div className="rounded-[2rem] border border-dashed border-[rgba(255,255,255,0.08)] p-8 text-center text-xs font-bold text-[#cbd5e1] uppercase tracking-widest bg-white/2 select-none">
-                No active delivery runs claimed
+                No active deliveries. Pick up an open request to start earning Credits.
               </div>
             ) : (
               <div className="space-y-4">
@@ -395,6 +453,19 @@ export default function CarryPackagePage() {
 
         </div>
       </div>
+
+      <TrialRestrictedModal
+        isOpen={showTrialModal}
+        onClose={handleTrialContinueSimulate}
+        actionName="Claim Campus Delivery"
+        description="Trial users can browse available campus packages, but claiming real deliveries and generating OTP handoff codes requires a verified student account."
+      />
+
+      <PendingVerificationModal
+        isOpen={showPendingModal}
+        onClose={() => setShowPendingModal(false)}
+        actionName="Claim Campus Delivery"
+      />
     </SidebarShell>
   );
 }

@@ -9,10 +9,24 @@ import {
 } from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import {
+  isDemoMode,
+  getDemoUser,
+  getDemoOutsideRequestById,
+  getDemoMessages,
+  sendDemoMessage,
+  updateDemoOutsideRequest,
+} from "@/lib/demoSession";
+import { INITIAL_DEMO_OUTSIDE_REQUESTS, INITIAL_DEMO_MESSAGES } from "@/lib/demoData";
 import { SidebarShell } from "../../components/SidebarShell";
 import { Button } from "../../components/ui/Button";
 import { Alert } from "../../components/ui/Alert";
 import { StatusBadge } from "../../components/ui/StatusBadge";
+import { ReviewModal } from "../../components/ui/ReviewModal";
+import { StatusTimeline } from "../../components/ui/StatusTimeline";
+import ReportBlockModal from "../../components/ui/ReportBlockModal";
+import TrialRestrictedModal from "../../components/ui/TrialRestrictedModal";
+import PendingVerificationModal from "../../components/ui/PendingVerificationModal";
 
 type OutsideRequest = {
   id: string;
@@ -59,6 +73,24 @@ export default function OutsideRequestDetailPage() {
   const [upiId, setUpiId] = useState("");
   
   const [errorMessage, setErrorMessage] = useState("");
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [revieweeId, setRevieweeId] = useState("");
+  const [revieweeName, setRevieweeName] = useState("");
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [showTrialModal, setShowTrialModal] = useState(false);
+  const [showPendingModal, setShowPendingModal] = useState(false);
+  const [trialActionName, setTrialActionName] = useState("Perform Real Action");
+
+  function handleTrialContinueSimulate() {
+    setShowTrialModal(false);
+    if (request) {
+      const updated = updateDemoOutsideRequest(request.id, {
+        carrier_id: currentUserId,
+        status: "NEGOTIATING",
+      });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+    }
+  }
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -68,6 +100,27 @@ export default function OutsideRequestDetailPage() {
     let cancelled = false;
 
     async function loadData() {
+      if (isDemoMode()) {
+        const demoUser = getDemoUser();
+        if (!cancelled) {
+          setCurrentUserId(demoUser.id);
+          setCurrentProfileName(demoUser.full_name);
+        }
+
+        const demoReq = getDemoOutsideRequestById(requestId) || INITIAL_DEMO_OUTSIDE_REQUESTS[1];
+        if (!cancelled) {
+          setRequest(demoReq as unknown as OutsideRequest);
+        }
+
+        const demoMsgs = getDemoMessages(requestId);
+        if (!cancelled) {
+          setMessages(demoMsgs.length ? (demoMsgs as Message[]) : (INITIAL_DEMO_MESSAGES["demo-out-2"] as Message[]));
+        }
+
+        setLoading(false);
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push("/login");
@@ -123,6 +176,8 @@ export default function OutsideRequestDetailPage() {
     }
 
     loadData();
+
+    if (isDemoMode()) return;
 
     // Subscribe to changes on requests and messages
     const requestChannel = supabase
@@ -180,6 +235,12 @@ export default function OutsideRequestDetailPage() {
     const content = newMessage.trim();
     setNewMessage("");
 
+    if (isDemoMode()) {
+      const demoMsg = sendDemoMessage(request.id, content);
+      setMessages((prev) => [...prev, demoMsg as Message]);
+      return;
+    }
+
     await supabase.from("outside_messages").insert({
       request_id: request.id,
       sender_id: currentUserId,
@@ -190,6 +251,32 @@ export default function OutsideRequestDetailPage() {
 
   async function handleJoinNegotiation() {
     if (!request || request.requester_id === currentUserId) return;
+
+    if (isDemoMode()) {
+      setTrialActionName("Claim Outside Task");
+      setShowTrialModal(true);
+      return;
+    }
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("verification_status")
+        .eq("id", user.id)
+        .single();
+
+      if (
+        profile &&
+        profile.verification_status !== "approved" &&
+        profile.verification_status !== "verified" &&
+        profile.verification_status !== "submitted" &&
+        profile.verification_status !== "id_submitted"
+      ) {
+        setShowPendingModal(true);
+        return;
+      }
+    }
 
     // Join task as carrier using secure RPC
     const { error } = await supabase.rpc("claim_outside_request", {
@@ -211,6 +298,12 @@ export default function OutsideRequestDetailPage() {
 
     setProposalAmount("");
 
+    if (isDemoMode()) {
+      const demoMsg = sendDemoMessage(request.id, `Proposed a cash reward of ₹${amount}`, amount);
+      setMessages((prev) => [...prev, demoMsg as Message]);
+      return;
+    }
+
     // Propose reward using secure RPC
     const { error } = await supabase.rpc("propose_outside_reward", {
       p_request_id: request.id,
@@ -225,6 +318,18 @@ export default function OutsideRequestDetailPage() {
   async function handleAcceptProposal(msgId: string, amount: number) {
     if (!request) return;
 
+    if (isDemoMode()) {
+      const updated = updateDemoOutsideRequest(request.id, {
+        final_reward: amount,
+        status: "NEGOTIATING",
+      });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, proposal_status: "accepted" } : m))
+      );
+      return;
+    }
+
     // Accept proposal using secure RPC
     const { error } = await supabase.rpc("accept_outside_reward", {
       p_request_id: request.id,
@@ -238,6 +343,13 @@ export default function OutsideRequestDetailPage() {
 
   async function handleRejectProposal(msgId: string) {
     if (!request) return;
+
+    if (isDemoMode()) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, proposal_status: "rejected" } : m))
+      );
+      return;
+    }
 
     // Update proposal message status to rejected (allowed via RLS UPDATE policy)
     const { error } = await supabase
@@ -273,6 +385,19 @@ export default function OutsideRequestDetailPage() {
       contactDetail = `Email: ${email}`;
     }
 
+    if (isDemoMode()) {
+      const isReq = request.requester_id === currentUserId;
+      const updated = updateDemoOutsideRequest(request.id, {
+        contact_shared: true,
+        requester_contact: isReq ? contactDetail : request.requester_contact,
+        carrier_contact: !isReq ? contactDetail : request.carrier_contact,
+      });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+      const demoMsg = sendDemoMessage(request.id, `[CONTACT INFO SHARED] ${contactDetail}`);
+      setMessages((prev) => [...prev, demoMsg as Message]);
+      return;
+    }
+
     // Update request record contact details using secure RPC
     await supabase.rpc("share_outside_contact", {
       p_request_id: request.id,
@@ -295,6 +420,13 @@ export default function OutsideRequestDetailPage() {
     const upiUrl = `upi://pay?pa=${upiId.trim()}&pn=${encodeURIComponent(currentProfileName)}&am=${request.final_reward ?? request.suggested_reward}&cu=INR`;
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiUrl)}`;
 
+    if (isDemoMode()) {
+      const updated = updateDemoOutsideRequest(request.id, { payment_qr_url: qrUrl });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+      setUpiId("");
+      return;
+    }
+
     await supabase.rpc("set_outside_payment_qr", {
       p_request_id: request.id,
       p_qr_url: qrUrl
@@ -306,6 +438,12 @@ export default function OutsideRequestDetailPage() {
   async function handleMarkPaid() {
     if (!request) return;
 
+    if (isDemoMode()) {
+      const updated = updateDemoOutsideRequest(request.id, { payment_status: "PAYMENT_SENT" });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+      return;
+    }
+
     await supabase.rpc("mark_outside_payment_sent", {
       p_request_id: request.id
     });
@@ -313,6 +451,12 @@ export default function OutsideRequestDetailPage() {
 
   async function handleConfirmPaid() {
     if (!request) return;
+
+    if (isDemoMode()) {
+      const updated = updateDemoOutsideRequest(request.id, { payment_status: "PAID_CONFIRMED", status: "PAID" });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+      return;
+    }
 
     await supabase.rpc("confirm_outside_payment_received", {
       p_request_id: request.id
@@ -322,6 +466,12 @@ export default function OutsideRequestDetailPage() {
   async function handleStartTask() {
     if (!request) return;
 
+    if (isDemoMode()) {
+      const updated = updateDemoOutsideRequest(request.id, { status: "IN_PROGRESS" });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+      return;
+    }
+
     await supabase.rpc("start_outside_task", {
       p_request_id: request.id
     });
@@ -329,6 +479,12 @@ export default function OutsideRequestDetailPage() {
 
   async function handleCompleteTask() {
     if (!request) return;
+
+    if (isDemoMode()) {
+      const updated = updateDemoOutsideRequest(request.id, { status: "COMPLETED" });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+      return;
+    }
 
     await supabase.rpc("complete_outside_task", {
       p_request_id: request.id
@@ -338,6 +494,12 @@ export default function OutsideRequestDetailPage() {
   async function handleCancelTask() {
     if (!request) return;
     if (!confirm("Are you sure you want to cancel this task?")) return;
+
+    if (isDemoMode()) {
+      const updated = updateDemoOutsideRequest(request.id, { status: "CANCELLED" });
+      if (updated) setRequest(updated as unknown as OutsideRequest);
+      return;
+    }
 
     await supabase.rpc("cancel_outside_request", {
       p_request_id: request.id
@@ -450,6 +612,14 @@ export default function OutsideRequestDetailPage() {
                   
                   {/* Share Contact Control */}
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setShowReportModal(true)}
+                      className="px-2.5 py-1 rounded bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 text-red-400 flex items-center gap-1 transition-colors mr-2"
+                      title="Report or Block User"
+                    >
+                      <ShieldAlert className="h-3.5 w-3.5" />
+                      <span>Safety Center</span>
+                    </button>
                     <span className="text-[9px]">Share:</span>
                     <button
                       onClick={() => handleShareContact("phone")}
@@ -559,6 +729,14 @@ export default function OutsideRequestDetailPage() {
           {/* Right Side: Task Status & Details */}
           <animated.div style={slideSpring} className="space-y-6 overflow-y-auto pr-1 h-full">
             
+            {/* Task Timeline Panel */}
+            {isParticipant && (
+              <div className="rounded-[2rem] border border-[rgba(255,255,255,0.08)] p-6 bg-[#080d16]/30 space-y-4">
+                <h3 className="font-display font-bold text-white border-b border-[rgba(255,255,255,0.06)] pb-3">Task Timeline</h3>
+                <StatusTimeline taskStatus={request.status} />
+              </div>
+            )}
+
             {/* Reward & Negotiation Panel */}
             {isParticipant && (
               <div className="rounded-[2rem] border border-[rgba(255,255,255,0.08)] p-6 bg-[#080d16]/30 space-y-4">
@@ -764,11 +942,72 @@ export default function OutsideRequestDetailPage() {
               </div>
             </div>
 
+            {/* Review Prompt Card */}
+            {request.status === "COMPLETED" && isParticipant && (
+              <div className="rounded-[2rem] border border-[#eab308]/20 bg-[#eab308]/5 p-5 space-y-3">
+                <h3 className="font-display font-bold text-white flex items-center gap-2">
+                  <span>⭐</span>
+                  <span>Rate Your Experience</span>
+                </h3>
+                <p className="text-xs text-[#cbd5e1] font-semibold">
+                  How was working with {isRequester ? "the carrier" : "the requester"}?
+                </p>
+                <button
+                  onClick={() => {
+                    const otherId = isRequester ? request.carrier_id! : request.requester_id;
+                    setRevieweeId(otherId);
+                    setRevieweeName(isRequester ? "the carrier" : "the requester");
+                    setShowReviewModal(true);
+                  }}
+                  className="neo-btn-primary py-2.5 px-5 text-xs font-bold uppercase tracking-wider bg-[#eab308] hover:bg-[#d97706] text-white border-none rounded-xl"
+                >
+                  Leave a Review
+                </button>
+              </div>
+            )}
+
           </animated.div>
 
         </div>
 
       </div>
+
+      {/* Review Modal */}
+      {showReviewModal && (
+        <ReviewModal
+          isOpen={showReviewModal}
+          onClose={() => setShowReviewModal(false)}
+          revieweeId={revieweeId}
+          revieweeName={revieweeName}
+          requestId={requestId}
+          requestType="outside"
+          onSubmitSuccess={() => setShowReviewModal(false)}
+        />
+      )}
+
+      {/* Safety Report/Block Modal */}
+      {showReportModal && (
+        <ReportBlockModal
+          isOpen={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          reportedUserId={currentUserId === request.requester_id ? (request.carrier_id || "") : request.requester_id}
+          reportedUserName={currentUserId === request.requester_id ? "Carrier" : "Requester"}
+          requestId={requestId}
+        />
+      )}
+
+      <TrialRestrictedModal
+        isOpen={showTrialModal}
+        onClose={handleTrialContinueSimulate}
+        actionName={trialActionName}
+        description="Trial users can explore the negotiation interface, but claiming real tasks and transacting via UPI requires a verified account."
+      />
+
+      <PendingVerificationModal
+        isOpen={showPendingModal}
+        onClose={() => setShowPendingModal(false)}
+        actionName={trialActionName}
+      />
     </SidebarShell>
   );
 }

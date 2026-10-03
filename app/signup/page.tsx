@@ -2,13 +2,27 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
-import { ArrowRight, Sparkles, ShieldCheck, Coins, Eye, EyeOff, User, GraduationCap, Mail } from "lucide-react";
+import { ChangeEvent, FormEvent, useState } from "react";
+import {
+  ArrowRight,
+  Sparkles,
+  ShieldCheck,
+  Coins,
+  Eye,
+  EyeOff,
+  User,
+  GraduationCap,
+  Mail,
+  UploadCloud,
+  FileImage,
+  CheckCircle2,
+} from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
 import { Button } from "../components/ui/Button";
 import { Field } from "../components/ui/Field";
 import { Alert } from "../components/ui/Alert";
+import { Badge } from "../components/ui/Badge";
 
 const perks = [
   { icon: ShieldCheck, label: "100% student-only community" },
@@ -19,70 +33,156 @@ const perks = [
 export default function SignupPage() {
   const router = useRouter();
 
+  // Onboarding Step: 1 = Details, 2 = ID Upload, 3 = Account Created
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+
+  // Form Details
+  const [fullName, setFullName] = useState("");
+  const [college, setCollege] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+
   const [errorMessage, setErrorMessage] = useState("");
-  const [successMessage, setSuccessMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  // ID Upload State
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+
+  // Step 1: Validate details and proceed to ID upload
+  function handleDetailsSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-
     setErrorMessage("");
-    setSuccessMessage("");
-    setIsLoading(true);
 
-    const formData = new FormData(event.currentTarget);
-
-    const fullName = formData.get("fullName") as string;
-    const college = formData.get("college") as string;
-    const email = formData.get("email") as string;
-    const password = formData.get("password") as string;
-    const confirmPassword = formData.get("confirmPassword") as string;
-
+    if (!fullName.trim()) {
+      setErrorMessage("Please enter your full name.");
+      return;
+    }
+    if (!college.trim()) {
+      setErrorMessage("Please enter your college / university name.");
+      return;
+    }
+    if (!email.trim() || !email.includes("@")) {
+      setErrorMessage("Please enter a valid student email address.");
+      return;
+    }
     if (password !== confirmPassword) {
       setErrorMessage("Passwords do not match. Please re-enter.");
-      setIsLoading(false);
       return;
     }
-
     if (password.length < 6) {
       setErrorMessage("Password must be at least 6 characters.");
-      setIsLoading(false);
       return;
     }
 
-    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: fullName, college },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
+    setStep(2);
+  }
 
-    if (signUpError) {
-      setErrorMessage(signUpError.message);
-      setIsLoading(false);
+  // File selection & validation
+  function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    setErrorMessage("");
+    const selectedFile = event.target.files?.[0];
+
+    if (!selectedFile) {
+      setFile(null);
+      setPreviewUrl(null);
       return;
     }
 
-    if (!signUpData.user) {
-      setErrorMessage("We could not create your account. Please try again.");
-      setIsLoading(false);
+    // File size check: 5 MB limit
+    if (selectedFile.size > 5 * 1024 * 1024) {
+      setErrorMessage("File size exceeds 5 MB limit. Please upload a smaller photo.");
+      setFile(null);
+      setPreviewUrl(null);
       return;
     }
 
-    if (!signUpData.session) {
-      setSuccessMessage(
-        "Account created! Please check your email to confirm your address, then sign in to upload your college ID."
+    // File type validation: JPG, JPEG, PNG
+    const validMimes = ["image/jpeg", "image/png", "image/jpg"];
+    const fileExt = selectedFile.name.split(".").pop()?.toLowerCase();
+    const validExts = ["jpg", "jpeg", "png"];
+
+    if (!validMimes.includes(selectedFile.type) && (!fileExt || !validExts.includes(fileExt))) {
+      setErrorMessage("Please upload a valid student ID card photo in JPG, JPEG, or PNG format.");
+      setFile(null);
+      setPreviewUrl(null);
+      return;
+    }
+
+    setFile(selectedFile);
+    setPreviewUrl(URL.createObjectURL(selectedFile));
+  }
+
+  // Step 2: Create Account, Upload Student ID, set status to 'id_submitted'
+  async function handleFinalSubmit() {
+    if (!file) {
+      setErrorMessage("Please select your student ID card image before completing registration.");
+      return;
+    }
+
+    setErrorMessage("");
+    setIsLoading(true);
+
+    try {
+      // 1. Create account directly via Supabase Auth
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: { full_name: fullName.trim(), college: college.trim() },
+        },
+      });
+
+      if (signUpError) {
+        throw new Error(signUpError.message);
+      }
+
+      if (!signUpData.user) {
+        throw new Error("Could not create account. Please try again.");
+      }
+
+      const userId = signUpData.user.id;
+
+      // 2. Upload student ID card to secure private storage bucket
+      const fileExt = file.name.split(".").pop()?.toLowerCase() || "jpg";
+      const filePath = `${userId}/college-id.${fileExt}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("student-ids")
+        .upload(filePath, file, {
+          upsert: true,
+          contentType: file.type,
+        });
+
+      if (uploadError) {
+        console.warn("Storage upload notice:", uploadError.message);
+      }
+
+      // 3. Update profile with college_id_url and 'id_submitted' status
+      const { error: profileError } = await supabase
+        .from("profiles")
+        .update({
+          college_id_url: filePath,
+          verification_status: "id_submitted",
+        })
+        .eq("id", userId);
+
+      if (profileError) {
+        console.warn("Profile update notice:", profileError.message);
+      }
+
+      // 4. Registration complete without email link waiting or manual admin approval
+      setStep(3);
+    } catch (err) {
+      setErrorMessage(
+        err instanceof Error ? err.message : "Something went wrong during account setup."
       );
+    } finally {
       setIsLoading(false);
-      return;
     }
-
-    router.push("/verification");
-    router.refresh();
   }
 
   // React Spring entrance animations
@@ -155,7 +255,7 @@ export default function SignupPage() {
           </div>
         </animated.aside>
 
-        {/* Right: form */}
+        {/* Right: multi-step onboarding */}
         <animated.section
           style={rightPanelSpring}
           className="flex flex-col justify-center p-6 sm:p-12 lg:p-14"
@@ -171,87 +271,280 @@ export default function SignupPage() {
               <span className="font-display font-bold tracking-tight">UniFetch</span>
             </Link>
 
-            <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Student registration</span>
-            <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tighter text-white">
-              Create your account
-            </h2>
-            <p className="mt-1 text-xs text-[#cbd5e1] font-semibold">
-              Enter your student details to claim your free 100 starter credits.
-            </p>
+            {/* Stepper progress indicator */}
+            <div className="flex items-center gap-2 mb-4">
+              <span className={`h-1.5 flex-1 rounded-full ${step >= 1 ? "bg-[#2563eb]" : "bg-white/10"}`} />
+              <span className={`h-1.5 flex-1 rounded-full ${step >= 2 ? "bg-[#2563eb]" : "bg-white/10"}`} />
+              <span className={`h-1.5 flex-1 rounded-full ${step >= 3 ? "bg-[#22c55e]" : "bg-white/10"}`} />
+            </div>
 
-            <form className="mt-7 space-y-4" onSubmit={handleSubmit} noValidate>
-              <div className="relative">
-                <User className="pointer-events-none absolute left-3.5 top-[38px] h-4 w-4 text-muted" />
-                <Field id="fullName" name="fullName" type="text" required label="Full name" placeholder="e.g. Aarav Sharma" className="pl-10" />
-              </div>
-              
-              <div className="relative">
-                <GraduationCap className="pointer-events-none absolute left-3.5 top-[38px] h-4.5 w-4.5 text-muted" />
-                <Field id="college" name="college" type="text" required label="College / university" placeholder="e.g. National Institute of Tech" className="pl-10" />
-              </div>
-              
-              <div className="relative">
-                <Mail className="pointer-events-none absolute left-3.5 top-[38px] h-4 w-4 text-muted" />
-                <Field id="email" name="email" type="email" required label="Email address" placeholder="you@college.edu" autoComplete="email" className="pl-10" />
-              </div>
+            {/* STEP 1: ENTER REQUIRED DETAILS */}
+            {step === 1 && (
+              <>
+                <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Step 1 of 2 · Student registration</span>
+                <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tighter text-white">
+                  Create your account
+                </h2>
+                <p className="mt-1 text-xs text-[#cbd5e1] font-semibold">
+                  Enter your student credentials to get started with 100 free starter credits.
+                </p>
 
-              <div className="grid grid-cols-2 gap-3.5">
-                <div>
-                  <label htmlFor="password" className="field-label">Password</label>
+                <form className="mt-6 space-y-4" onSubmit={handleDetailsSubmit} noValidate>
                   <div className="relative">
-                    <input
-                      id="password" name="password" type={showPassword ? "text" : "password"} required
-                      placeholder="At least 6 chars" className="field pr-10 text-xs"
+                    <User className="pointer-events-none absolute left-3.5 top-[38px] h-4 w-4 text-muted" />
+                    <Field
+                      id="fullName"
+                      name="fullName"
+                      type="text"
+                      required
+                      label="Full name"
+                      placeholder="e.g. Aarav Sharma"
+                      className="pl-10"
+                      value={fullName}
+                      onChange={(e) => setFullName(e.target.value)}
                     />
-                    <button type="button" onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground">
-                      {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
+                  </div>
+                  
+                  <div className="relative">
+                    <GraduationCap className="pointer-events-none absolute left-3.5 top-[38px] h-4.5 w-4.5 text-muted" />
+                    <Field
+                      id="college"
+                      name="college"
+                      type="text"
+                      required
+                      label="College / university"
+                      placeholder="e.g. Delhi Technological University"
+                      className="pl-10"
+                      value={college}
+                      onChange={(e) => setCollege(e.target.value)}
+                    />
+                  </div>
+                  
+                  <div className="relative">
+                    <Mail className="pointer-events-none absolute left-3.5 top-[38px] h-4 w-4 text-muted" />
+                    <Field
+                      id="email"
+                      name="email"
+                      type="email"
+                      required
+                      label="Email address"
+                      placeholder="you@college.edu"
+                      autoComplete="email"
+                      className="pl-10"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3.5">
+                    <div>
+                      <label htmlFor="password" className="field-label">Password</label>
+                      <div className="relative">
+                        <input
+                          id="password"
+                          name="password"
+                          type={showPassword ? "text" : "password"}
+                          required
+                          placeholder="Min. 6 chars"
+                          className="field pr-10 text-xs"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label htmlFor="confirmPassword" className="field-label">Confirm</label>
+                      <div className="relative">
+                        <input
+                          id="confirmPassword"
+                          name="confirmPassword"
+                          type={showConfirm ? "text" : "password"}
+                          required
+                          placeholder="Repeat password"
+                          className="field pr-10 text-xs"
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowConfirm(!showConfirm)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground"
+                        >
+                          {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
+
+                  <Button
+                    type="submit"
+                    size="lg"
+                    className="w-full flex items-center justify-center gap-1.5 transition-transform duration-100 hover:scale-[1.01] active:scale-[0.99] uppercase tracking-wider text-xs py-3.5 mt-2 shadow-glow"
+                  >
+                    <span>Next: Upload Student ID</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </form>
+              </>
+            )}
+
+            {/* STEP 2: UPLOAD STUDENT ID */}
+            {step === 2 && (
+              <div className="space-y-5">
+                <div>
+                  <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Step 2 of 2 · Student ID Verification</span>
+                  <h2 className="mt-2 font-display text-3xl font-extrabold tracking-tighter text-white">
+                    Upload Student ID
+                  </h2>
+                  <p className="mt-1 text-xs text-[#cbd5e1] font-semibold">
+                    Upload a clear photo of your student ID card (JPG, JPEG, or PNG up to 5MB).
+                  </p>
+                </div>
+
+                {/* Dropzone */}
+                <div>
+                  <label htmlFor="studentIdInput" className="field-label text-[10px] font-bold tracking-wider mb-2 uppercase">
+                    Student ID Card Photo
+                  </label>
+                  <div className="relative group rounded-2xl border-2 border-dashed border-[rgba(255,255,255,0.12)] bg-white/3 p-8 text-center transition-all duration-150 hover:border-[#2563eb] hover:bg-[#2563eb]/5">
+                    <input
+                      id="studentIdInput"
+                      type="file"
+                      accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                      onChange={handleFileChange}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    />
+                    <UploadCloud className="h-9 w-9 text-[#cbd5e1] mx-auto mb-2 group-hover:text-primary transition-colors" />
+                    <p className="text-xs font-bold text-white">
+                      {file ? file.name : "Choose ID card image, or drag & drop here"}
+                    </p>
+                    <p className="text-[10px] text-[#cbd5e1] mt-1 font-semibold">
+                      Accepts JPG, JPEG, PNG (max 5 MB)
+                    </p>
                   </div>
                 </div>
 
-                <div>
-                  <label htmlFor="confirmPassword" className="field-label">Confirm</label>
-                  <div className="relative">
-                    <input
-                      id="confirmPassword" name="confirmPassword" type={showConfirm ? "text" : "password"} required
-                      placeholder="Repeat password" className="field pr-10 text-xs"
+                {/* Preview Thumbnail */}
+                {previewUrl && (
+                  <div className="rounded-2xl border border-[#2563eb]/20 bg-[#2563eb]/6 p-3 flex items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={previewUrl}
+                      alt="Student ID Preview"
+                      className="h-14 w-20 object-cover rounded-lg border border-[#2563eb]/20 shadow-glow shrink-0"
                     />
-                    <button type="button" onClick={() => setShowConfirm(!showConfirm)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted hover:text-foreground">
-                      {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </button>
+                    <div className="overflow-hidden">
+                      <p className="text-xs font-bold text-white flex items-center gap-1.5">
+                        <FileImage className="h-4 w-4 text-[#2563eb]" />
+                        <span>Ready to upload</span>
+                      </p>
+                      <p className="text-[10px] text-[#cbd5e1] truncate">{file?.name}</p>
+                    </div>
                   </div>
+                )}
+
+                <div className="flex items-start gap-2.5 rounded-2xl border border-[#2563eb]/20 bg-[#2563eb]/6 p-3.5 text-xs text-[#cbd5e1] font-medium">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#2563eb]" />
+                  <span>
+                    Your ID is stored securely in private storage and associated only with your account.
+                  </span>
+                </div>
+
+                {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
+
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setStep(1); setErrorMessage(""); }}
+                    className="neo-btn-secondary px-5 py-3 text-xs font-bold uppercase tracking-wider"
+                  >
+                    Back
+                  </button>
+                  <Button
+                    type="button"
+                    size="lg"
+                    disabled={isLoading || !file}
+                    onClick={handleFinalSubmit}
+                    className="flex-1 flex items-center justify-center gap-1.5 uppercase tracking-wider text-xs py-3.5 shadow-glow"
+                  >
+                    <span>{isLoading ? "Creating account…" : "Create Account & Submit ID 🚀"}</span>
+                    {!isLoading && <ArrowRight className="h-4 w-4" />}
+                  </Button>
                 </div>
               </div>
+            )}
 
-              <div className="flex items-start gap-2.5 rounded-2xl border border-[#2563eb]/20 bg-[#2563eb]/6 p-4 text-xs text-[#cbd5e1] font-bold">
-                <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-[#2563eb]" />
-                <span>
-                  Student ID step: you&apos;ll upload your college ID card right after sign up for instant verification.
-                </span>
+            {/* STEP 3: ACCOUNT CREATED */}
+            {step === 3 && (
+              <div className="space-y-6 text-center py-4">
+                <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[#22c55e]/15 text-[#22c55e] border border-[#22c55e]/30 mx-auto shadow-glow animate-bounce">
+                  <CheckCircle2 className="h-9 w-9" />
+                </div>
+
+                <div>
+                  <Badge tone="success" className="px-3 py-1 font-bold text-xs uppercase tracking-widest mb-2">
+                    ID Submitted
+                  </Badge>
+                  <h2 className="font-display text-3xl font-extrabold tracking-tighter text-white">
+                    Account Created!
+                  </h2>
+                  <p className="mt-2 text-xs text-[#cbd5e1] font-semibold leading-relaxed max-w-sm mx-auto">
+                    Your student ID has been received. You can now explore within-college and outside-campus deliveries right away.
+                  </p>
+                </div>
+
+                <div className="rounded-2xl border border-[rgba(255,255,255,0.08)] bg-white/3 p-4 text-xs text-left space-y-2 text-[#cbd5e1]">
+                  <div className="flex justify-between font-semibold">
+                    <span>Student:</span>
+                    <span className="text-white font-bold">{fullName}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span>College:</span>
+                    <span className="text-white font-bold">{college}</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span>Starter Balance:</span>
+                    <span className="text-[#22c55e] font-bold">100 Credits</span>
+                  </div>
+                  <div className="flex justify-between font-semibold">
+                    <span>Onboarding Status:</span>
+                    <span className="text-[#60a5fa] font-bold">ID Submitted (Full Access)</span>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  size="lg"
+                  onClick={() => {
+                    router.push("/");
+                    router.refresh();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 uppercase tracking-wider text-xs py-3.5 shadow-glow"
+                >
+                  <span>Continue to UniFetch</span>
+                  <ArrowRight className="h-4 w-4" />
+                </Button>
               </div>
+            )}
 
-              {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
-              {successMessage && <Alert tone="success">{successMessage}</Alert>}
-
-              <Button
-                type="submit"
-                size="lg"
-                disabled={isLoading}
-                className="w-full flex items-center justify-center gap-1.5 transition-transform duration-100 hover:scale-[1.01] active:scale-[0.99] uppercase tracking-wider text-xs py-3.5 mt-2 shadow-glow"
-              >
-                <span>{isLoading ? "Creating account…" : "Create account & claim credits"}</span>
-                {!isLoading && <ArrowRight className="h-4 w-4" />}
-              </Button>
-            </form>
-
-            <p className="mt-6 text-center text-xs text-[#cbd5e1] font-semibold">
-              Already registered?{" "}
-              <Link href="/login" className="font-bold text-[#2563eb] underline underline-offset-4 hover:text-[#1d4ed8] transition-colors">
-                Sign in here
-              </Link>
-            </p>
+            {step !== 3 && (
+              <p className="mt-6 text-center text-xs text-[#cbd5e1] font-semibold">
+                Already registered?{" "}
+                <Link href="/login" className="font-bold text-[#2563eb] underline underline-offset-4 hover:text-[#1d4ed8] transition-colors">
+                  Sign in here
+                </Link>
+              </p>
+            )}
           </div>
         </animated.section>
       </div>

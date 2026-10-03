@@ -13,28 +13,23 @@ import {
   Package,
   MapPin,
   Navigation,
-  Clock,
   ThumbsUp,
   User,
-  Percent,
   MessageSquare,
-  Truck
+  Truck,
+  Sparkles,
+  ArrowRight
 } from "lucide-react";
 import { useSpring, useTransition, animated, config, useTrail } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { enableDemoMode } from "@/lib/demoSession";
 import { LogoMark } from "./components/ui/Logo";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
 import NavItem from "./components/NavItem";
 import { withinCollegeItems } from "@/lib/navConfig";
 
-const tickerItems = [
-  "⚡ Rahul accepted a package to Library Gate",
-  "🪙 Sneha delivered to Hostel C",
-  "🛡️ Aman is on the way to Main Gate",
-  "📦 Food parcel delivered to Hostel D2 in 12 mins",
-  "⭐ Campus Trust Rating: 4.95 / 5.0 across 1,420+ deliveries"
-];
+const tickerItems: string[] = [];
 
 const mockPreviews = [
   {
@@ -95,20 +90,20 @@ const mockPreviews = [
 
 const faqs = [
   {
-    q: "How do I know my package won't be stolen or opened?",
-    a: "Every UniFetch carrier is verified with a real student ID card. More importantly, deliveries are protected by a tamper-proof 6-digit OTP generated exclusively for you. The carrier only receives credit confirmation after you inspect your parcel and share the OTP.",
+    q: "What is the difference between Within College and Outside Campus?",
+    a: "Within College uses Credits — a virtual currency — to move things around campus. No real money changes hands between students. Outside Campus uses real money (UPI/INR) for tasks like bringing items from the city. The reward is negotiated directly between the requester and carrier.",
   },
   {
-    q: "What if I'm walking to the main gate for something else?",
-    a: "That's the beauty of UniFetch! Open the Carry tab, see who has a package waiting at your gate, grab it on your way, drop it at their hostel lobby, and pocket credits or cash tips with almost zero detour.",
+    q: "How do Credits work?",
+    a: "Creating a within-campus request costs 50 Credits. The carrier earns +35 Credits on successful delivery. You can buy Credits by paying the UniFetch owner directly — 100 Credits = ₹10. Credits are added manually after payment verification.",
   },
   {
-    q: "What are UniFetch credits used for?",
-    a: "Credits allow you to get your own packages fetched for free. 1 standard delivery = ~30 credits. When you carry a parcel for a friend, you earn credits to have someone fetch your parcels next week.",
+    q: "How does payment work for Outside Campus tasks?",
+    a: "The requester and carrier negotiate a reward in the chat. Once agreed, the carrier shares their UPI QR code inside the chat. The requester scans and pays directly. No third party holds money — it's direct student-to-student.",
   },
   {
-    q: "Can I use UniFetch for food orders (Swiggy / Zomato)?",
-    a: "Yes! Many campus delivery drivers are barred from entering past the main gate turnstile. You can create a quick delivery request for food drop-offs so your meal reaches your hostel hot.",
+    q: "What is Broadcast?",
+    a: "Broadcast is a quick announcement feature. For example: 'Going to Chennai tomorrow — let me know if anyone needs something brought back.' It's different from a structured trip — it's just a quick heads-up to the community.",
   },
 ];
 
@@ -119,7 +114,6 @@ export default function Home() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isCheckingUser, setIsCheckingUser] = useState(true);
   const [selectedPreview, setSelectedPreview] = useState(0);
-  const [ordersPerWeek, setOrdersPerWeek] = useState(3);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -135,10 +129,8 @@ export default function Home() {
 
   // Real stats state
   const [realStats, setRealStats] = useState({
-    activeStudents: "2K+",
-    deliveredPackages: "850+",
-    successRate: "99.2%",
-    support: "24/7"
+    activeStudents: "0",
+    deliveredPackages: "0",
   });
 
   // Dynamic Ticker
@@ -158,12 +150,10 @@ export default function Home() {
           .select("id", { count: "exact", head: true })
           .eq("status", "delivered");
 
-        // Format and set stats
+        // Use actual DB counts — never fake fallbacks
         setRealStats({
-          activeStudents: studentCount && studentCount > 0 ? `${studentCount}+` : "2K+",
-          deliveredPackages: deliveredCount && deliveredCount > 0 ? `${deliveredCount}+` : "850+",
-          successRate: "99.2%",
-          support: "24/7"
+          activeStudents: studentCount !== null ? `${studentCount}` : "0",
+          deliveredPackages: deliveredCount !== null ? `${deliveredCount}` : "0",
         });
 
         // Query latest 5 deliveries/requests for activity feed
@@ -173,6 +163,7 @@ export default function Home() {
           .order("created_at", { ascending: false })
           .limit(5);
 
+        // Only show ticker if real DB data exists
         if (recentRequests && recentRequests.length > 0) {
           const formatted = recentRequests.map((req) => {
             const desc = req.package_description || "Package";
@@ -185,6 +176,7 @@ export default function Home() {
           });
           setTickerList(formatted);
         }
+        // If no real data, tickerList stays empty — ticker section will be hidden
       } catch (err) {
         console.error("Error loading home page stats:", err);
       }
@@ -216,7 +208,8 @@ export default function Home() {
           return;
         }
 
-        if (profile.verification_status !== "approved") {
+        const validStatuses = ["approved", "verified", "submitted", "id_submitted"];
+        if (!validStatuses.includes(profile.verification_status)) {
           router.replace("/verification");
           return;
         }
@@ -232,6 +225,11 @@ export default function Home() {
 
     getUser();
   }, [router]);
+
+  function handleStartDemo() {
+    enableDemoMode();
+    router.push("/outside/browse");
+  }
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -293,8 +291,6 @@ export default function Home() {
     );
   }
 
-  const stepsSaved = ordersPerWeek * 1800 * 16;
-  const hoursSaved = Math.round((ordersPerWeek * 22 * 16) / 60);
 
   return (
     <main className="min-h-screen bg-[#05070b] text-[#ffffff] selection:bg-[#2563eb]/30 selection:text-white grid-bg relative overflow-x-hidden">
@@ -326,7 +322,7 @@ export default function Home() {
             {/* Section anchor links (non-auth) */}
             <a href="#how-it-works" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">How It Works</a>
             <a href="#features" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">Features</a>
-            <a href="#calculator" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">For Campus</a>
+            <a href="#features" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">Why UniFetch</a>
             <a href="#faqs" className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-[#cbd5e1] transition hover:text-white rounded-lg hover:bg-white/5">FAQs</a>
 
             {/* Authenticated nav items using shared NavItem component */}
@@ -360,9 +356,17 @@ export default function Home() {
               </div>
             ) : (
               <div className="hidden sm:flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleStartDemo}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#2563eb]/40 bg-[#2563eb]/10 px-3.5 py-2 text-xs font-bold text-[#60a5fa] hover:bg-[#2563eb]/20 hover:text-white transition-all uppercase tracking-wider"
+                >
+                  <Sparkles className="h-3.5 w-3.5 text-[#60a5fa]" />
+                  <span>Try UniFetch</span>
+                </button>
                 <Link href="/login" className="btn-ghost px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#cbd5e1] hover:text-white">Sign in</Link>
                 <Link href="/signup" className="neo-btn-primary px-5 py-2.5 text-[11px] uppercase tracking-wider shadow-glow">
-                  Get Started
+                  Create Account
                 </Link>
               </div>
             )}
@@ -389,7 +393,7 @@ export default function Home() {
               <nav className="flex flex-col gap-4 text-xs font-bold uppercase tracking-wider text-[#cbd5e1]">
                 <a href="#how-it-works" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">How It Works</a>
                 <a href="#features" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">Features</a>
-                <a href="#calculator" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">For Campus</a>
+                <a href="#features" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">Why UniFetch</a>
                 <a href="#faqs" onClick={() => setMobileMenuOpen(false)} className="hover:text-white py-2 border-b border-[rgba(255,255,255,0.04)]">FAQs</a>
                 {isLoggedIn ? (
                   <>
@@ -416,11 +420,19 @@ export default function Home() {
                   </>
                 ) : (
                   <div className="flex flex-col gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setMobileMenuOpen(false); handleStartDemo(); }}
+                      className="neo-btn-primary py-3 text-center text-xs flex items-center justify-center gap-2"
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      <span>Try UniFetch (Demo Mode)</span>
+                    </button>
                     <Link href="/login" onClick={() => setMobileMenuOpen(false)} className="neo-btn-secondary py-3 text-center text-xs border-[rgba(255,255,255,0.08)]">
                       Sign in
                     </Link>
-                    <Link href="/signup" onClick={() => setMobileMenuOpen(false)} className="neo-btn-primary py-3 text-center text-xs">
-                      Get Started
+                    <Link href="/signup" onClick={() => setMobileMenuOpen(false)} className="neo-btn-secondary py-3 text-center text-xs border-[rgba(255,255,255,0.08)] text-white">
+                      Create Account
                     </Link>
                   </div>
                 )}
@@ -442,23 +454,44 @@ export default function Home() {
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#22c55e] opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-[#22c55e]" />
                 </span>
-                <span>Trusted by 2000+ students across campus</span>
+                <span>Need It? Ask Someone Who&apos;s Going.</span>
               </div>
 
               {/* Giant Headline */}
               <div className="space-y-2">
                 <h1 className="font-display text-5xl font-extrabold tracking-tighter text-white sm:text-6xl xl:text-[5.5rem] leading-[1.03]">
-                  Packages move.
+                  Get it there.
                 </h1>
                 <h1 className="font-display text-5xl font-extrabold tracking-tighter text-[#2563eb] sm:text-6xl xl:text-[5.5rem] leading-[1.03] drop-shadow-[0_0_25px_rgba(37,99,235,0.25)]">
-                  You focus.
+                  Without going there.
                 </h1>
               </div>
 
               {/* Description */}
               <p className="max-w-xl text-base leading-relaxed text-[#cbd5e1] font-normal sm:text-lg">
-                The fastest and safest way to send, carry, and receive packages on campus.
+                Ask someone already heading your way to bring, pick up, or drop something for you.
               </p>
+
+              {/* Try Demo & Create Account CTAs */}
+              {!isLoggedIn && (
+                <div className="flex flex-wrap items-center gap-3.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleStartDemo}
+                    className="neo-btn-primary px-6 py-3.5 text-xs font-extrabold uppercase tracking-widest shadow-glow flex items-center gap-2 transition-transform active:scale-95"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    <span>Try UniFetch (No Login)</span>
+                  </button>
+                  <Link
+                    href="/signup"
+                    className="neo-btn-secondary px-6 py-3.5 text-xs font-extrabold uppercase tracking-widest border border-white/10 hover:border-white/20 bg-white/5 hover:bg-white/10 text-white transition-all flex items-center gap-2"
+                  >
+                    <span>Create Account</span>
+                    <ArrowRight className="h-4 w-4" />
+                  </Link>
+                </div>
+              )}
 
               {/* Choice Section: What do you need? */}
               <div className="pt-4 space-y-6">
@@ -474,13 +507,16 @@ export default function Home() {
                         <h4 className="font-display text-lg font-bold text-white">Within College</h4>
                       </div>
                       <p className="text-xs text-[#cbd5e1] leading-relaxed">
-                        Need something carried or delivered inside college? Request a student to help using UniFetch Credits.
+                        Move things around campus using Credits — no cash involved.
                       </p>
                       <ul className="text-[10px] text-primary/80 font-bold space-y-1 pt-2 uppercase tracking-wider">
                         <li>• 50 Credits to request</li>
-                        <li>• +35 Credits for completing delivery</li>
-                        <li>• Local Dorm Carry</li>
+                        <li>• +35 Credits for a successful delivery</li>
+                        <li>• Credits only — no real money</li>
                       </ul>
+                      <div className="inline-flex items-center gap-1.5 rounded-full border border-[#2563eb]/25 bg-[#2563eb]/8 px-3 py-1 text-[8px] font-extrabold uppercase tracking-widest text-[#2563eb] mt-1">
+                        Credits Only • No Cash
+                      </div>
                     </div>
                     <Link
                       href={isLoggedIn ? "/requests" : "/signup"}
@@ -491,20 +527,23 @@ export default function Home() {
                   </div>
 
                   {/* Option 2: Outside Campus */}
-                  <div className="neo-card flex flex-col justify-between p-6 space-y-4 border border-[rgba(255,255,255,0.08)] bg-[#080d16]/50 rounded-2xl hover:border-[#2563eb]/30 transition-all duration-300">
+                  <div className="neo-card flex flex-col justify-between p-6 space-y-4 border border-[rgba(255,255,255,0.08)] bg-[#080d16]/50 rounded-2xl hover:border-[#10b981]/30 transition-all duration-300">
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
                         <span className="text-xl">🚗</span>
                         <h4 className="font-display text-lg font-bold text-white">Outside Campus</h4>
                       </div>
                       <p className="text-xs text-[#cbd5e1] leading-relaxed">
-                        Going outside campus or need something brought from Chennai or another location? Connect with another student and agree on the price directly.
+                        Going somewhere? Help someone on the way and earn real money.
                       </p>
-                      <ul className="text-[10px] text-primary/80 font-bold space-y-1 pt-2 uppercase tracking-wider">
+                      <ul className="text-[10px] text-[#10b981]/80 font-bold space-y-1 pt-2 uppercase tracking-wider">
                         <li>• Real Money • Student to Student</li>
-                        <li>• Buy/Return/Repair/Pickup</li>
-                        <li>• Direct UPI QR Transfers</li>
+                        <li>• Bring / Buy / Return / Drop / Pick Up</li>
+                        <li>• Direct UPI payment inside chat</li>
                       </ul>
+                      <div className="inline-flex items-center gap-1.5 rounded-full border border-[#10b981]/25 bg-[#10b981]/8 px-3 py-1 text-[8px] font-extrabold uppercase tracking-widest text-[#10b981] mt-1">
+                        Real Money • INR
+                      </div>
                     </div>
                     <Link
                       href={isLoggedIn ? "/outside/browse" : "/signup"}
@@ -530,11 +569,9 @@ export default function Home() {
       {/* Statistics Section */}
       <section className="relative py-12 border-t border-[rgba(255,255,255,0.08)] bg-[#05070b]/60">
         <div className="mx-auto max-w-7xl px-6 lg:px-8">
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard icon={<User className="h-5 w-5 text-[#2563eb]" />} number={realStats.activeStudents} label="Active Students" />
-            <StatCard icon={<Package className="h-5 w-5 text-[#2563eb]" />} number={realStats.deliveredPackages} label="Delivered Packages" />
-            <StatCard icon={<Percent className="h-5 w-5 text-[#2563eb]" />} number={realStats.successRate} label="Success Rate" />
-            <StatCard icon={<Clock className="h-5 w-5 text-[#2563eb]" />} number={realStats.support} label="Support" />
+          <div className="grid gap-6 sm:grid-cols-2 max-w-xl mx-auto">
+            <StatCard icon={<User className="h-5 w-5 text-[#2563eb]" />} number={realStats.activeStudents} label="Registered Students" />
+            <StatCard icon={<Package className="h-5 w-5 text-[#2563eb]" />} number={realStats.deliveredPackages} label="Campus Deliveries" />
           </div>
         </div>
       </section>
@@ -565,9 +602,9 @@ export default function Home() {
                     <div className="h-10 w-10 flex items-center justify-center bg-[#2563eb]/10 rounded-xl mb-4 text-[#2563eb]">
                       <Package className="h-5 w-5" />
                     </div>
-                    <h3 className="font-display text-lg font-bold text-white">Create Request</h3>
+                    <h3 className="font-display text-lg font-bold text-white">Post a Request</h3>
                     <p className="mt-3 text-xs leading-relaxed text-[#cbd5e1] font-medium">
-                      Add package details, pick-up and drop locations.
+                      Describe what you need and where it needs to go.
                     </p>
                   </animated.div>
                 );
@@ -581,9 +618,9 @@ export default function Home() {
                     <div className="h-10 w-10 flex items-center justify-center bg-[#2563eb]/10 rounded-xl mb-4 text-[#2563eb]">
                       <Truck className="h-5 w-5" />
                     </div>
-                    <h3 className="font-display text-lg font-bold text-white">Someone Carries</h3>
+                    <h3 className="font-display text-lg font-bold text-white">Someone Helps</h3>
                     <p className="mt-3 text-xs leading-relaxed text-[#cbd5e1] font-medium">
-                      A trusted student picks it up on their way.
+                      A student already heading that way picks it up for you.
                     </p>
                   </animated.div>
                 );
@@ -596,9 +633,9 @@ export default function Home() {
                   <div className="h-10 w-10 flex items-center justify-center bg-[#2563eb]/10 rounded-xl mb-4 text-[#2563eb]">
                     <ThumbsUp className="h-5 w-5" />
                   </div>
-                  <h3 className="font-display text-lg font-bold text-white">You Receive</h3>
+                  <h3 className="font-display text-lg font-bold text-white">Get it Done</h3>
                   <p className="mt-3 text-xs leading-relaxed text-[#cbd5e1] font-medium">
-                    Get your package safely at your destination.
+                    Review each other and build trust in the community.
                   </p>
                 </animated.div>
               );
@@ -607,7 +644,8 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Live Activity Ticker */}
+      {/* Live Activity Ticker — only shown when real DB data is available */}
+      {tickerList.length > 0 && (
       <section className="border-y border-[rgba(255,255,255,0.08)] bg-[rgba(255,255,255,0.01)] py-4 overflow-hidden relative">
         <div className="mx-auto max-w-7xl px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
           {/* Label */}
@@ -632,6 +670,7 @@ export default function Home() {
           </div>
         </div>
       </section>
+      )}
 
       {/* Features Section */}
       <section id="features" className="relative py-24">
@@ -641,30 +680,30 @@ export default function Home() {
               Everything you need, built for campus
             </h2>
             <p className="max-w-xl mx-auto text-sm text-[#cbd5e1] font-semibold">
-              Move parcels security-verified, earn rewards, and secure drop-offs without gate delays.
+              Student peer network for logistics within college and outside campus.
             </p>
           </div>
 
           <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             <FeatureCard
               icon={<Shield className="h-6 w-6 text-[#2563eb]" />}
-              title="Secure & Verified"
-              description="All users are verified with active student credentials for a safe experience."
+              title="Within College Credits"
+              description="Move things around campus using Credits. No cash needed between students."
             />
             <FeatureCard
               icon={<Navigation className="h-6 w-6 text-[#2563eb]" />}
-              title="Live Tracking"
-              description="Real-time status updates and routing tracking for complete peace of mind."
+              title="Outside Campus Tasks"
+              description="Students going outside can help you bring, buy, return, or drop things."
             />
             <FeatureCard
               icon={<Award className="h-6 w-6 text-[#2563eb]" />}
-              title="Earn Rewards"
-              description="Earn UniCredits on walks you're already taking and spend them on free fetches."
+              title="Broadcasts"
+              description="Quick announcements. Tell everyone where you're going or what you need."
             />
             <FeatureCard
               icon={<MessageSquare className="h-6 w-6 text-[#2563eb]" />}
-              title="24/7 Support"
-              description="We're here to help anytime, anywhere to resolve any delivery issues."
+              title="Reviews & Trust"
+              description="After every completed task, build your reputation through honest reviews."
             />
           </div>
         </div>
@@ -789,43 +828,18 @@ export default function Home() {
                 </div>
               </div>
 
-              {/* Savings Calculator integrated directly inside */}
+              {/* V2 Features list instead of Calculator */}
               <div className="p-6 bg-[rgba(255,255,255,0.02)] border border-[rgba(255,255,255,0.05)] rounded-[2rem] space-y-5">
                 <div>
-                  <h4 className="font-display text-md font-bold text-white">Semester Savings Calculator</h4>
-                  <p className="text-[11px] text-[#cbd5e1] mt-1">Select the number of packages or meals you get at the gate weekly:</p>
+                  <h4 className="font-display text-md font-bold text-white">Version 2 Peer Network</h4>
+                  <p className="text-[11px] text-[#cbd5e1] mt-1">UniFetch connects students to solve campus logistics together:</p>
                 </div>
 
-                <div className="flex gap-2.5">
-                  {[1, 2, 3, 5, 8].map((val) => (
-                    <button
-                      key={val}
-                      onClick={() => setOrdersPerWeek(val)}
-                      type="button"
-                      className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${
-                        ordersPerWeek === val
-                          ? "bg-[#2563eb] text-white"
-                          : "bg-transparent text-[#cbd5e1] border border-[rgba(255,255,255,0.08)] hover:border-[#2563eb]/45"
-                      }`}
-                    >
-                      {val} / wk
-                    </button>
-                  ))}
-                </div>
-
-                <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 pt-2">
-                  <div className="p-3.5 bg-[#2563eb]/6 border border-[#2563eb]/15 rounded-2xl text-center">
-                    <p className="text-[9px] font-bold uppercase tracking-wider text-[#2563eb]">Steps Saved</p>
-                    <p className="text-xl font-extrabold text-white mt-1">~{stepsSaved.toLocaleString()}</p>
-                  </div>
-                  <div className="p-3.5 bg-[#2563eb]/6 border border-[#2563eb]/15 rounded-2xl text-center">
-                    <p className="text-[9px] font-bold uppercase tracking-wider text-[#2563eb]">Time Saved</p>
-                    <p className="text-xl font-extrabold text-white mt-1">~{hoursSaved} Hours</p>
-                  </div>
-                  <div className="p-3.5 bg-[#eab308]/6 border border-[#eab308]/15 rounded-2xl text-center col-span-2 sm:col-span-1">
-                    <p className="text-[9px] font-bold uppercase tracking-wider text-[#eab308]">Credits Earned</p>
-                    <p className="text-xl font-extrabold text-[#eab308] mt-1">+{ordersPerWeek * 30 * 16} 🪙</p>
-                  </div>
+                <div className="grid gap-3 pt-2">
+                  <BulletCheck text="Campus deliveries using Credits — no cash between students" />
+                  <BulletCheck text="Outside help with real UPI payments directly in chat" />
+                  <BulletCheck text="Broadcast your trips and let others request help" />
+                  <BulletCheck text="Build trust with reviews after every task" />
                 </div>
               </div>
 
@@ -874,19 +888,19 @@ export default function Home() {
             <div className="lg:col-span-7 space-y-6">
               <p className="text-xs font-bold uppercase tracking-widest text-[#2563eb] font-display">Get started</p>
               <h2 className="font-display text-4xl font-extrabold sm:text-5xl leading-[1.1] text-white">
-                Send. Carry. Earn.<br />
-                Do it all with UniFetch.
+                Within College or Outside.<br />
+                UniFetch connects you.
               </h2>
               <p className="max-w-xl text-xs leading-relaxed text-[#cbd5e1] font-semibold sm:text-sm">
-                Join thousands of students who trust UniFetch for hassle-free campus deliveries.
+                Find students heading your way or announce your trip to help others.
               </p>
 
               <div className="pt-4 flex flex-col sm:flex-row gap-4 max-w-md">
-                <Link href={isLoggedIn ? "/request" : "/signup"} className="neo-btn-primary px-8 py-4 text-xs font-extrabold uppercase tracking-widest shadow-glow">
-                  Send a Package
+                <Link href="/requests" className="neo-btn-primary px-8 py-4 text-xs font-extrabold uppercase tracking-widest shadow-glow">
+                  Within College
                 </Link>
-                <Link href="/carry" className="neo-btn-secondary px-8 py-4 text-xs font-extrabold uppercase tracking-widest border-[rgba(255,255,255,0.08)] bg-transparent hover:bg-white/5">
-                  Become a Carrier
+                <Link href="/outside/browse" className="neo-btn-secondary px-8 py-4 text-xs font-extrabold uppercase tracking-widest border-[rgba(255,255,255,0.08)] bg-transparent hover:bg-white/5">
+                  Outside Campus
                 </Link>
               </div>
             </div>
@@ -911,7 +925,7 @@ export default function Home() {
                 <span className="font-bold text-white font-display text-lg tracking-tight">UniFetch</span>
               </Link>
               <p className="text-xs text-[#cbd5e1] max-w-xs leading-relaxed font-semibold">
-                Making campus deliveries simple, safe, and reliable by connecting peers already on the walk.
+                Student-powered campus logistics. Making campus deliveries simple, safe, and reliable.
               </p>
             </div>
 
@@ -928,12 +942,12 @@ export default function Home() {
 
             {/* For Campus */}
             <div className="lg:col-span-2.5 space-y-4">
-              <h5 className="font-display text-[10px] font-extrabold uppercase tracking-widest text-[#2563eb]">For Campus</h5>
+              <h5 className="font-display text-[10px] font-extrabold uppercase tracking-widest text-[#2563eb]">Support & Trust</h5>
               <div className="flex flex-col gap-2.5 text-xs text-[#cbd5e1] font-semibold">
-                <Link href="/requests" className="hover:text-white transition-colors">Partner with us</Link>
-                <Link href="/carry" className="hover:text-white transition-colors">Safety</Link>
-                <Link href="/" className="hover:text-white transition-colors">Guidelines</Link>
-                <a href="#faqs" className="hover:text-white transition-colors">Support</a>
+                <Link href="/safety" className="hover:text-white transition-colors">Safety Guide</Link>
+                <Link href="/credits" className="hover:text-white transition-colors">How Credits Work</Link>
+                <Link href="/outside/browse" className="hover:text-white transition-colors">Trust & Reviews</Link>
+                <Link href="/verification" className="hover:text-white transition-colors">Help & Support</Link>
               </div>
             </div>
 
@@ -941,9 +955,7 @@ export default function Home() {
             <div className="lg:col-span-2 space-y-4">
               <h5 className="font-display text-[10px] font-extrabold uppercase tracking-widest text-[#2563eb]">Contact Us</h5>
               <div className="flex flex-col gap-2 text-xs text-[#cbd5e1] font-semibold">
-                <span>hello@unifetch.com</span>
-                <span>+91 98765-43210</span>
-                <span>Mumbai, India</span>
+                <span>hello@unifetch.in</span>
               </div>
             </div>
           </div>

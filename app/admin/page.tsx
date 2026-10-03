@@ -59,10 +59,13 @@ export default function AdminDashboardPage() {
       const toRange = page * PAGE_SIZE - 1;
 
       // Fetch exact count first for pagination
-      const { count, error: countError } = await supabase
-        .from("profiles")
-        .select("id", { count: "exact", head: true })
-        .eq("verification_status", activeTab);
+      let countQuery = supabase.from("profiles").select("id", { count: "exact", head: true });
+      if (activeTab === "pending") {
+        countQuery = countQuery.in("verification_status", ["pending", "id_submitted"]);
+      } else {
+        countQuery = countQuery.eq("verification_status", activeTab);
+      }
+      const { count, error: countError } = await countQuery;
 
       if (countError) {
         console.error("Error getting profiles count:", countError);
@@ -74,10 +77,16 @@ export default function AdminDashboardPage() {
       setTotalCount(count || 0);
 
       // Fetch active page data
-      const { data, error } = await supabase
+      let dataQuery = supabase
         .from("profiles")
-        .select("id, full_name, college, email, college_id_url, verification_status, created_at")
-        .eq("verification_status", activeTab)
+        .select("id, full_name, college, email, college_id_url, verification_status, created_at");
+      if (activeTab === "pending") {
+        dataQuery = dataQuery.in("verification_status", ["pending", "id_submitted"]);
+      } else {
+        dataQuery = dataQuery.eq("verification_status", activeTab);
+      }
+
+      const { data, error } = await dataQuery
         .order("created_at", { ascending: false })
         .range(fromRange, toRange);
 
@@ -295,7 +304,7 @@ export default function AdminDashboardPage() {
             <div className="grid gap-5 sm:grid-cols-2">
               {queueTransitions((style, profile) => {
                 const isProcessing = processingId === profile.id;
-                const isPending = profile.verification_status === "pending";
+                const isPending = profile.verification_status === "pending" || profile.verification_status === "id_submitted";
 
                 return (
                   <animated.div style={style}>
@@ -309,11 +318,12 @@ export default function AdminDashboardPage() {
                           <Badge
                             tone={
                               profile.verification_status === "approved" ? "success" :
-                              profile.verification_status === "rejected" ? "danger" : "warning"
+                              profile.verification_status === "rejected" ? "danger" :
+                              profile.verification_status === "id_submitted" ? "info" : "warning"
                             }
                             className="font-bold text-[8px] uppercase tracking-wider px-2 py-0.5"
                           >
-                            {profile.verification_status}
+                            {profile.verification_status === "id_submitted" ? "ID Submitted" : profile.verification_status}
                           </Badge>
                         </div>
 

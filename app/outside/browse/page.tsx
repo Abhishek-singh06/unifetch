@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Search, Calendar, Compass, Plus, Navigation, Clock, User, Check, X, ClipboardList } from "lucide-react";
 import { useTransition, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, getDemoTrips, getDemoOutsideRequests } from "@/lib/demoSession";
 import { SidebarShell } from "../../components/SidebarShell";
 import { Alert } from "../../components/ui/Alert";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -71,6 +72,12 @@ export default function BrowseOutsideCampusPage() {
   // Load basic authentication
   useEffect(() => {
     async function checkAuth() {
+      if (isDemoMode()) {
+        const demoUser = getDemoUser();
+        setCurrentUserId(demoUser.id);
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push("/login");
@@ -87,6 +94,15 @@ export default function BrowseOutsideCampusPage() {
 
     async function loadTrips() {
       if (!currentUserId) return;
+
+      if (isDemoMode()) {
+        const demoTrips = getDemoTrips();
+        const publicTrips = (demoTrips as unknown as OutsideTrip[]).filter(t => t.creator_id !== currentUserId);
+        setTrips(publicTrips);
+        setTripsLoading(false);
+        return;
+      }
+
       const today = new Date().toISOString().split("T")[0];
 
       const { data, error } = await supabase
@@ -95,7 +111,7 @@ export default function BrowseOutsideCampusPage() {
           *,
           profiles:creator_id ( full_name )
         `)
-        .eq("status", "active")
+        .in("status", ["ACTIVE", "active"])
         .gte("departure_date", today)
         .order("departure_date", { ascending: true });
 
@@ -113,6 +129,8 @@ export default function BrowseOutsideCampusPage() {
     }
 
     loadTrips();
+
+    if (isDemoMode()) return;
 
     const channel = supabase
       .channel("outside-trips-channel")
@@ -133,6 +151,14 @@ export default function BrowseOutsideCampusPage() {
 
     async function loadRequests() {
       if (!currentUserId) return;
+
+      if (isDemoMode()) {
+        const demoReqs = getDemoOutsideRequests();
+        const publicReqs = (demoReqs as unknown as OutsideRequest[]).filter(r => r.requester_id !== currentUserId && r.status === "OPEN");
+        setRequests(publicReqs);
+        setRequestsLoading(false);
+        return;
+      }
 
       const { data, error } = await supabase
         .from("outside_requests")
@@ -158,6 +184,8 @@ export default function BrowseOutsideCampusPage() {
 
     loadRequests();
 
+    if (isDemoMode()) return;
+
     const channel = supabase
       .channel("outside-requests-browse-channel")
       .on("postgres_changes", { event: "*", schema: "public", table: "outside_requests" }, () => {
@@ -177,6 +205,14 @@ export default function BrowseOutsideCampusPage() {
 
     async function loadMyTrips() {
       if (!currentUserId) return;
+
+      if (isDemoMode()) {
+        const demoTrips = getDemoTrips();
+        const myDemoTrips = (demoTrips as unknown as OutsideTrip[]).filter(t => t.creator_id === currentUserId);
+        setMyTrips(myDemoTrips);
+        setMyTripsLoading(false);
+        return;
+      }
 
       const { data, error } = await supabase
         .from("outside_trips")
@@ -206,6 +242,8 @@ export default function BrowseOutsideCampusPage() {
 
     loadMyTrips();
 
+    if (isDemoMode()) return;
+
     const channel = supabase
       .channel("outside-my-trips-channel")
       .on("postgres_changes", { event: "*", schema: "public", table: "outside_trips" }, () => {
@@ -227,15 +265,24 @@ export default function BrowseOutsideCampusPage() {
     setErrorMessage("");
     setSuccessMessage("");
 
+    if (isDemoMode()) {
+      setMyTrips(prev => prev.map(t => t.id === tripId ? { ...t, status } : t));
+      setSuccessMessage(`Demo Mode: Trip successfully marked as ${status}!`);
+      return;
+    }
+
+    const dbStatus = status.toUpperCase();
+
     const { error } = await supabase
       .from("outside_trips")
-      .update({ status, updated_at: new Date().toISOString() })
+      .update({ status: dbStatus, updated_at: new Date().toISOString() })
       .eq("id", tripId)
       .eq("creator_id", currentUserId);
 
     if (error) {
       setErrorMessage("Failed to update trip status: " + error.message);
     } else {
+      setMyTrips(prev => prev.map(t => t.id === tripId ? { ...t, status: dbStatus } : t));
       setSuccessMessage(`Trip successfully marked as ${status}!`);
     }
   }
@@ -302,10 +349,10 @@ export default function BrowseOutsideCampusPage() {
               </span>
             </div>
             <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
-              Outside Campus Carry
+              Outside Campus
             </h1>
             <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
-              Find students traveling outside campus to fetch items, or announce your own trip to pick up tasks.
+              Going somewhere? Help someone on the way. Need something? Find a student heading there.
             </p>
           </div>
 
@@ -340,7 +387,7 @@ export default function BrowseOutsideCampusPage() {
                 : "border-transparent text-muted hover:text-white"
             }`}
           >
-            🚗 Students Going Out
+            🚗 Active Trips
           </button>
           <button
             onClick={() => setActiveTab("requests")}
@@ -350,7 +397,7 @@ export default function BrowseOutsideCampusPage() {
                 : "border-transparent text-muted hover:text-white"
             }`}
           >
-            📋 Open Carry Requests
+            📋 Open Requests
           </button>
           <button
             onClick={() => setActiveTab("my-trips")}
@@ -360,7 +407,7 @@ export default function BrowseOutsideCampusPage() {
                 : "border-transparent text-muted hover:text-white"
             }`}
           >
-            🎒 My Trips &amp; Requests
+            🎒 My Activity
           </button>
         </div>
 
@@ -397,8 +444,8 @@ export default function BrowseOutsideCampusPage() {
                 {filteredTrips.length === 0 ? (
                   <EmptyState
                     icon={<Compass className="h-10 w-10 text-[#10b981] animate-pulse" />}
-                    title="No trips announced yet"
-                    description="Be the first one! If you are planning to go outside college soon, click 'I'm Going Out' to announce it."
+                    title="No active trips yet"
+                    description="Going somewhere outside campus? Announce your trip and help others."
                   />
                 ) : (
                   <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -474,7 +521,7 @@ export default function BrowseOutsideCampusPage() {
                             href={`/outside/create?trip_id=${trip.id}&destination=${encodeURIComponent(trip.destination)}`}
                             className="neo-btn-primary w-full py-3 text-center text-xs font-extrabold uppercase tracking-widest bg-[#10b981] hover:bg-[#059669] shadow-glow-emerald text-white border-none block"
                           >
-                            Ask Me to Bring Something
+                            Ask to Bring Something
                           </Link>
                         </div>
                       </animated.div>
@@ -535,7 +582,7 @@ export default function BrowseOutsideCampusPage() {
                               <div className="grid grid-cols-2 gap-3 pt-2">
                                 <div>
                                   <span className="text-[8px] font-extrabold uppercase tracking-widest text-[#cbd5e1] block">Suggested Reward</span>
-                                  <span className="text-sm font-black text-white">₹{req.suggested_reward}</span>
+                                  <span className="text-sm font-black text-white">₹{req.suggested_reward} <span className="text-[9px] font-bold text-[#10b981] lowercase">(negotiable)</span></span>
                                 </div>
                                 <div>
                                   <span className="text-[8px] font-extrabold uppercase tracking-widest text-[#cbd5e1] block">Preferred Date</span>
@@ -599,9 +646,9 @@ export default function BrowseOutsideCampusPage() {
                                     Trip to {trip.destination}
                                   </h3>
                                   <span className={`text-[8px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full border ${
-                                    trip.status === "active" 
+                                    trip.status?.toLowerCase() === "active" 
                                       ? "bg-[#10b981]/15 text-[#10b981] border-[#10b981]/30" 
-                                      : trip.status === "completed"
+                                      : trip.status?.toLowerCase() === "completed"
                                       ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
                                       : "bg-red-500/10 text-red-400 border-red-500/20"
                                   }`}>
@@ -622,7 +669,7 @@ export default function BrowseOutsideCampusPage() {
                                 </div>
                               </div>
 
-                              {trip.status === "active" && (
+                              {trip.status?.toLowerCase() === "active" && (
                                 <div className="flex items-center gap-2">
                                   <button
                                     onClick={() => handleUpdateTripStatus(trip.id, "completed")}

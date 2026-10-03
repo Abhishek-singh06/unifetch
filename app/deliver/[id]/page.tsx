@@ -6,10 +6,13 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, MapPin, Package, Shield, CheckCircle } from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, getDemoPackages, verifyDemoPackageOtp } from "@/lib/demoSession";
+import { INITIAL_DEMO_PACKAGES } from "@/lib/demoData";
 import { SidebarShell } from "../../components/SidebarShell";
 import { Button } from "../../components/ui/Button";
 import { Alert } from "../../components/ui/Alert";
 import { PageLoader } from "../../components/ui/Spinner";
+import { ReviewModal } from "../../components/ui/ReviewModal";
 
 type PackageRequest = {
   id: string;
@@ -19,6 +22,7 @@ type PackageRequest = {
   pickup_time: string;
   status: string;
   carrier_id: string | null;
+  requester_id: string;
   otp_verified: boolean;
   created_at: string;
 };
@@ -36,10 +40,19 @@ export default function DeliverPackagePage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [message, setMessage] = useState("");
   const [shakeTrigger, setShakeTrigger] = useState(0);
+  const [showReviewModal, setShowReviewModal] = useState(false);
 
   useEffect(() => {
     async function loadRequest() {
       setErrorMessage("");
+
+      if (isDemoMode()) {
+        const demoPkgs = getDemoPackages();
+        const demoReq = demoPkgs.find((p) => p.id === id) || INITIAL_DEMO_PACKAGES[1];
+        setRequest(demoReq as unknown as PackageRequest);
+        setIsLoading(false);
+        return;
+      }
 
       const {
         data: { user },
@@ -53,7 +66,7 @@ export default function DeliverPackagePage() {
       const { data, error } = await supabase
         .from("package_requests")
         .select(
-          "id, package_description, pickup_location, delivery_location, pickup_time, status, carrier_id, otp_verified, created_at"
+          "id, package_description, pickup_location, delivery_location, pickup_time, status, carrier_id, requester_id, otp_verified, created_at"
         )
         .eq("id", id)
         .single();
@@ -90,6 +103,26 @@ export default function DeliverPackagePage() {
     }
 
     setIsDelivering(true);
+
+    if (isDemoMode()) {
+      const valid = verifyDemoPackageOtp(request.id, otp) || otp === "719342" || otp === "482910";
+      if (!valid) {
+        setErrorMessage("❌ Incorrect OTP. Please enter the demo OTP shown on the package card (e.g. 719342).");
+        setShakeTrigger((prev) => prev + 1);
+        setIsDelivering(false);
+        return;
+      }
+
+      setMessage("🎉 [Demo Mode] Delivery successfully confirmed! 35 Demo Credits awarded.");
+      setRequest({
+        ...request,
+        status: "delivered",
+        otp_verified: true,
+      });
+      setIsDelivering(false);
+      setTimeout(() => setShowReviewModal(true), 800);
+      return;
+    }
 
     const {
       data: { user },
@@ -131,11 +164,6 @@ export default function DeliverPackagePage() {
     });
 
     setIsDelivering(false);
-
-    setTimeout(() => {
-      router.push("/carry");
-      router.refresh();
-    }, 2000);
   }
 
   // React Spring incorrect OTP shake animation
@@ -278,12 +306,20 @@ export default function DeliverPackagePage() {
                   <p className="mt-2.5 text-xs text-[#cbd5e1] font-semibold leading-relaxed">
                     The delivery has been validated via OTP. Credits have been credited to your campus wallet.
                   </p>
-                  <Link
-                    href="/carry"
-                    className="mt-6 inline-flex neo-btn-primary px-7 py-3.5 text-xs uppercase tracking-widest font-extrabold shadow-glow"
-                  >
-                    Return to Carry Board
-                  </Link>
+                  <div className="flex flex-col gap-3 mt-6">
+                    <button
+                      onClick={() => setShowReviewModal(true)}
+                      className="inline-flex items-center justify-center gap-1.5 uppercase tracking-widest text-xs font-bold py-3.5 rounded-xl border border-[#eab308]/20 bg-[#eab308]/15 text-[#eab308] hover:bg-[#eab308]/25 transition-colors shadow-glow"
+                    >
+                      <span>⭐ Leave a Review</span>
+                    </button>
+                    <Link
+                      href="/carry"
+                      className="inline-flex neo-btn-primary px-7 py-3.5 text-xs uppercase tracking-widest font-extrabold shadow-glow"
+                    >
+                      Return to Carry Board
+                    </Link>
+                  </div>
                 </div>
               </animated.div>
             ) : (
@@ -355,6 +391,25 @@ export default function DeliverPackagePage() {
         </div>
 
       </div>
+      {showReviewModal && (
+        <ReviewModal
+          isOpen={showReviewModal}
+          onClose={() => {
+            setShowReviewModal(false);
+            router.push("/carry");
+            router.refresh();
+          }}
+          revieweeId={request.requester_id}
+          revieweeName="the requester"
+          requestId={request.id}
+          requestType="campus"
+          onSubmitSuccess={() => {
+            setShowReviewModal(false);
+            router.push("/carry");
+            router.refresh();
+          }}
+        />
+      )}
     </SidebarShell>
   );
 }

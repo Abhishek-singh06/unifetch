@@ -25,7 +25,7 @@ export function EmptyState({
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-tint text-primary">
         {icon}
       </div>
-      <h3 className="mt-5 font-display text-xl font-bold text-[#0c241b]">{title}</h3>
+      <h3 className="mt-5 font-display text-xl font-bold text-white">{title}</h3>
       <p className="mt-2 max-w-sm text-sm text-muted">{description}</p>
       {action && <div className="mt-6">{action}</div>}
     </div>

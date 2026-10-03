@@ -1,0 +1,2024 @@
+-- UNIFETCH V2 CONSOLIDATED DATABASE MIGRATION SCRIPT
+-- Fully audited, idempotent, non-destructive script for Supabase SQL Editor.
+-- Handles: Profiles, Campus Package Requests, Private OTPs, Credit System,
+-- Outside Tasks, Outside Trips, Outside Messages, Broadcasts, Reviews,
+-- Payment Settings, Notifications, Moderation, Storage, and Realtime.
+
+-- SECTION 1: EXTENSIONS
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- SECTION 2: PROFILES TABLE & CORE HELPERS
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  full_name TEXT NOT NULL DEFAULT '',
+  college TEXT NOT NULL DEFAULT '',
+  email TEXT DEFAULT '',
+  college_id_url TEXT DEFAULT NULL,
+  id_card_url TEXT DEFAULT NULL,
+  id_card_submitted_at TIMESTAMPTZ DEFAULT NULL,
+  verification_status TEXT NOT NULL DEFAULT 'pending',
+  role TEXT NOT NULL DEFAULT 'student',
+  credits INTEGER NOT NULL DEFAULT 100,
+  hostel TEXT DEFAULT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deactivated')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ensure all columns exist even if the table already existed in earlier migrations
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS full_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS college TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS email TEXT DEFAULT '';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS college_id_url TEXT DEFAULT NULL;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS id_card_url TEXT DEFAULT NULL;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS id_card_submitted_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS verification_status TEXT NOT NULL DEFAULT 'pending';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'student';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS credits INTEGER NOT NULL DEFAULT 100;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS hostel TEXT DEFAULT NULL;
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- Common updated_at helper trigger function
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$;
+
+-- Admin check helper (SECURITY DEFINER avoids RLS recursion)
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
+  );
+END;
+$$;
+
+-- Approved student check (Allows 'approved' or 'verified' status, rejects deactivated)
+CREATE OR REPLACE FUNCTION public.is_approved_student()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() 
+      AND verification_status IN ('approved', 'verified')
+      AND status <> 'deactivated'
+  );
+END;
+$$;
+
+-- Deactivation check trigger function
+CREATE OR REPLACE FUNCTION public.check_user_status()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND status = 'deactivated'
+  ) THEN
+    RAISE EXCEPTION 'This account has been deactivated.';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- Enable RLS on profiles
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+
+-- Profiles RLS Policies
+DROP POLICY IF EXISTS "Users can view their own profile" ON public.profiles;
+DROP POLICY IF EXISTS "Authenticated users can view profiles" ON public.profiles;
+CREATE POLICY "Authenticated users can view profiles"
+  ON public.profiles FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
+CREATE POLICY "Users can update their own profile"
+  ON public.profiles FOR UPDATE
+  USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Admins can view and update all profiles" ON public.profiles;
+DROP POLICY IF EXISTS "Admins can update all profiles" ON public.profiles;
+CREATE POLICY "Admins can update all profiles"
+  ON public.profiles FOR ALL
+  USING (public.is_admin());
+
+-- Protect privileged columns on profiles trigger
+DROP TRIGGER IF EXISTS protect_profile_privileged_columns_trg ON public.profiles;
+
+CREATE OR REPLACE FUNCTION public.protect_profile_privileged_columns()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF public.is_admin() THEN
+    RETURN NEW;
+  END IF;
+
+  IF current_setting('unifetch.allow_credit_payout', true) = 'true' THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.role IS DISTINCT FROM OLD.role
+     OR NEW.credits IS DISTINCT FROM OLD.credits THEN
+    RAISE EXCEPTION 'Permission denied: role and credits can only be changed by an admin';
+  END IF;
+
+  -- Regular users may upload their ID and set status to submitted/id_submitted or reset to pending
+  IF NEW.verification_status IS DISTINCT FROM OLD.verification_status
+     AND NEW.verification_status NOT IN ('pending', 'submitted', 'id_submitted') THEN
+    RAISE EXCEPTION 'Permission denied: only an admin can verify or reject a student ID';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER protect_profile_privileged_columns_trg
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.protect_profile_privileged_columns();
+
+-- Auto-create profile upon auth signup trigger
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (
+    id, full_name, college, email, verification_status, role, credits, status, created_at, updated_at
+  )
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.raw_user_meta_data->>'full_name', ''),
+    COALESCE(NEW.raw_user_meta_data->>'college', ''),
+    COALESCE(NEW.email, ''),
+    'pending',
+    'student',
+    100,
+    'active',
+    NOW(),
+    NOW()
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+
+-- SECTION 3: CAMPUS PACKAGE REQUESTS & PRIVATE OTP STORAGE
+CREATE TABLE IF NOT EXISTS public.package_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  requester_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  carrier_id UUID DEFAULT NULL REFERENCES public.profiles(id) ON DELETE SET NULL,
+  package_description TEXT NOT NULL,
+  pickup_location TEXT NOT NULL,
+  delivery_location TEXT NOT NULL,
+  pickup_time TIMESTAMPTZ NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'matched', 'delivered', 'cancelled')),
+  otp_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  delivered_at TIMESTAMPTZ DEFAULT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ensure all columns exist on package_requests
+ALTER TABLE public.package_requests ADD COLUMN IF NOT EXISTS carrier_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+ALTER TABLE public.package_requests ADD COLUMN IF NOT EXISTS otp_verified BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.package_requests ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE public.package_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+-- Private table for Delivery OTPs (never exposed directly via RLS)
+CREATE TABLE IF NOT EXISTS public.request_otps (
+  request_id UUID PRIMARY KEY REFERENCES public.package_requests(id) ON DELETE CASCADE,
+  otp VARCHAR(6) NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Safely backfill request_otps from legacy pickup_otp if the column exists in package_requests
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+      AND table_name = 'package_requests' 
+      AND column_name = 'pickup_otp'
+  ) THEN
+    INSERT INTO public.request_otps (request_id, otp)
+    SELECT id, pickup_otp FROM public.package_requests
+    WHERE pickup_otp IS NOT NULL
+    ON CONFLICT (request_id) DO NOTHING;
+  END IF;
+END;
+$$;
+
+ALTER TABLE public.request_otps ENABLE ROW LEVEL SECURITY;
+-- No public RLS policies on request_otps: access strictly through RPCs
+
+ALTER TABLE public.package_requests ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Requesters can view their own requests" ON public.package_requests;
+CREATE POLICY "Requesters can view their own requests"
+  ON public.package_requests FOR SELECT
+  USING (auth.uid() = requester_id);
+
+-- Allows authenticated pending/submitted students to view open campus requests
+DROP POLICY IF EXISTS "Approved users can view pending requests" ON public.package_requests;
+DROP POLICY IF EXISTS "Authenticated users can view pending requests" ON public.package_requests;
+CREATE POLICY "Authenticated users can view pending requests"
+  ON public.package_requests FOR SELECT
+  USING (status = 'pending' AND auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Carriers can view their claimed deliveries" ON public.package_requests;
+CREATE POLICY "Carriers can view their claimed deliveries"
+  ON public.package_requests FOR SELECT
+  USING (auth.uid() = carrier_id);
+
+DROP POLICY IF EXISTS "Admins can view all requests" ON public.package_requests;
+CREATE POLICY "Admins can view all requests"
+  ON public.package_requests FOR SELECT
+  USING (public.is_admin());
+
+DROP TRIGGER IF EXISTS trg_check_status_package_requests ON public.package_requests;
+CREATE TRIGGER trg_check_status_package_requests
+  BEFORE INSERT ON public.package_requests
+  FOR EACH ROW EXECUTE FUNCTION public.check_user_status();
+
+-- Package Request RPCs
+DROP FUNCTION IF EXISTS public.create_package_request(text, text, text, timestamptz);
+DROP FUNCTION IF EXISTS public.create_package_request(text, text, text, timestamp with time zone);
+DROP FUNCTION IF EXISTS public.create_package_request(text, text, text, text);
+
+CREATE OR REPLACE FUNCTION public.create_package_request(
+  p_package_description TEXT,
+  p_pickup_location TEXT,
+  p_delivery_location TEXT,
+  p_pickup_time TIMESTAMPTZ
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_request_id UUID;
+  v_otp TEXT;
+  v_requester_credits INTEGER;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF NOT public.is_approved_student() THEN
+    RAISE EXCEPTION 'User not approved to create package requests';
+  END IF;
+
+  SELECT credits INTO v_requester_credits
+  FROM public.profiles
+  WHERE id = auth.uid()
+  FOR UPDATE;
+
+  IF v_requester_credits < 50 THEN
+    RAISE EXCEPTION 'Insufficient credits. You need at least 50 credits to make a request.';
+  END IF;
+
+  UPDATE public.profiles
+  SET credits = credits - 50, updated_at = NOW()
+  WHERE id = auth.uid();
+
+  INSERT INTO public.package_requests (
+    requester_id, package_description, pickup_location, delivery_location, pickup_time, status
+  )
+  VALUES (
+    auth.uid(), p_package_description, p_pickup_location, p_delivery_location, p_pickup_time, 'pending'
+  )
+  RETURNING id INTO v_request_id;
+
+  v_otp := LPAD(FLOOR(RANDOM() * 1000000)::TEXT, 6, '0');
+
+  INSERT INTO public.request_otps (request_id, otp)
+  VALUES (v_request_id, v_otp);
+
+  RETURN v_request_id;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.claim_package_request(uuid);
+
+CREATE OR REPLACE FUNCTION public.claim_package_request(
+  p_request_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_current_status TEXT;
+  v_requester_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF NOT public.is_approved_student() THEN
+    RAISE EXCEPTION 'User not approved to claim deliveries';
+  END IF;
+
+  SELECT status, requester_id INTO v_current_status, v_requester_id
+  FROM public.package_requests
+  WHERE id = p_request_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Request not found';
+  END IF;
+
+  IF v_current_status <> 'pending' THEN
+    RAISE EXCEPTION 'Request is no longer available';
+  END IF;
+
+  IF v_requester_id = auth.uid() THEN
+    RAISE EXCEPTION 'You cannot claim your own request';
+  END IF;
+
+  UPDATE public.package_requests
+  SET
+    carrier_id = auth.uid(),
+    status = 'matched',
+    updated_at = NOW()
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.get_my_request_otp(uuid);
+
+CREATE OR REPLACE FUNCTION public.get_my_request_otp(
+  p_request_id UUID
+)
+RETURNS TEXT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_otp TEXT;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT ro.otp INTO v_otp
+  FROM public.request_otps ro
+  JOIN public.package_requests pr ON pr.id = ro.request_id
+  WHERE ro.request_id = p_request_id
+    AND pr.requester_id = auth.uid();
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'OTP not found or access denied';
+  END IF;
+
+  RETURN v_otp;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.verify_package_otp(uuid, text);
+DROP FUNCTION IF EXISTS public.verify_package_otp(uuid, varchar);
+
+CREATE OR REPLACE FUNCTION public.verify_package_otp(
+  p_request_id UUID,
+  p_otp TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_stored_otp TEXT;
+  v_carrier_id UUID;
+  v_status TEXT;
+  v_requester_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF NOT public.is_approved_student() THEN
+    RAISE EXCEPTION 'User not approved for package requests';
+  END IF;
+
+  SELECT pr.carrier_id, pr.status, pr.requester_id, ro.otp
+  INTO v_carrier_id, v_status, v_requester_id, v_stored_otp
+  FROM public.package_requests pr
+  LEFT JOIN public.request_otps ro ON ro.request_id = pr.id
+  WHERE pr.id = p_request_id;
+
+  IF NOT FOUND THEN
+    RETURN FALSE;
+  END IF;
+
+  IF v_carrier_id IS DISTINCT FROM auth.uid() THEN
+    RETURN FALSE;
+  END IF;
+
+  IF v_status <> 'matched' THEN
+    RETURN FALSE;
+  END IF;
+
+  IF v_stored_otp IS NOT NULL AND v_stored_otp = p_otp THEN
+    UPDATE public.package_requests
+    SET
+      status = 'delivered',
+      otp_verified = TRUE,
+      delivered_at = NOW(),
+      updated_at = NOW()
+    WHERE id = p_request_id;
+
+    PERFORM set_config('unifetch.allow_credit_payout', 'true', false);
+    UPDATE public.profiles
+    SET credits = credits + 35, updated_at = NOW()
+    WHERE id = v_carrier_id;
+    PERFORM set_config('unifetch.allow_credit_payout', 'false', false);
+
+    RETURN TRUE;
+  END IF;
+
+  RETURN FALSE;
+END;
+$$;
+
+
+-- SECTION 4: CREDIT PURCHASES & ADMIN APPROVALS
+CREATE TABLE IF NOT EXISTS public.credit_purchases (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  credits INTEGER NOT NULL,
+  amount_inr NUMERIC(10,2) NOT NULL,
+  payment_reference TEXT NOT NULL,
+  payment_proof_url TEXT DEFAULT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'rejected')),
+  rejection_reason TEXT DEFAULT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  reviewed_at TIMESTAMPTZ DEFAULT NULL,
+  reviewed_by UUID DEFAULT NULL REFERENCES public.profiles(id) ON DELETE SET NULL
+);
+
+ALTER TABLE public.credit_purchases ADD COLUMN IF NOT EXISTS rejection_reason TEXT DEFAULT NULL;
+ALTER TABLE public.credit_purchases ADD COLUMN IF NOT EXISTS payment_proof_url TEXT DEFAULT NULL;
+ALTER TABLE public.credit_purchases ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ DEFAULT NULL;
+ALTER TABLE public.credit_purchases ADD COLUMN IF NOT EXISTS reviewed_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+
+ALTER TABLE public.credit_purchases ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view their own purchases" ON public.credit_purchases;
+CREATE POLICY "Users can view their own purchases"
+  ON public.credit_purchases FOR SELECT
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert their own purchase requests" ON public.credit_purchases;
+CREATE POLICY "Users can insert their own purchase requests"
+  ON public.credit_purchases FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Admins can view and manage all credit purchases" ON public.credit_purchases;
+CREATE POLICY "Admins can view and manage all credit purchases"
+  ON public.credit_purchases FOR ALL
+  USING (public.is_admin());
+
+-- Fix buy_credits signature: Drop legacy versions returning BOOLEAN/VOID before creating RETURNS UUID
+DROP FUNCTION IF EXISTS public.buy_credits(integer, text, text);
+DROP FUNCTION IF EXISTS public.buy_credits(integer, text);
+DROP FUNCTION IF EXISTS public.buy_credits(int, text, text);
+DROP FUNCTION IF EXISTS public.buy_credits(int, text);
+
+CREATE OR REPLACE FUNCTION public.buy_credits(
+  p_credits INTEGER,
+  p_payment_reference TEXT,
+  p_payment_proof_url TEXT
+)
+RETURNS UUID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_purchase_id UUID;
+  v_amount NUMERIC(10,2);
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF p_credits = 100 THEN
+    v_amount := 99.00;
+  ELSIF p_credits = 250 THEN
+    v_amount := 229.00;
+  ELSIF p_credits = 600 THEN
+    v_amount := 499.00;
+  ELSIF p_credits = 1500 THEN
+    v_amount := 999.00;
+  ELSE
+    RAISE EXCEPTION 'Invalid credit package: %', p_credits;
+  END IF;
+
+  INSERT INTO public.credit_purchases (
+    user_id, credits, amount_inr, payment_reference, payment_proof_url, status
+  )
+  VALUES (
+    auth.uid(), p_credits, v_amount, p_payment_reference, p_payment_proof_url, 'pending'
+  )
+  RETURNING id INTO v_purchase_id;
+
+  RETURN v_purchase_id;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.approve_credit_purchase(uuid);
+
+CREATE OR REPLACE FUNCTION public.approve_credit_purchase(
+  p_purchase_id UUID
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user_id UUID;
+  v_credits INTEGER;
+  v_status TEXT;
+BEGIN
+  IF auth.uid() IS NULL OR NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Permission denied: only admins may approve credit purchases';
+  END IF;
+
+  SELECT user_id, credits, status
+  INTO v_user_id, v_credits, v_status
+  FROM public.credit_purchases
+  WHERE id = p_purchase_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Purchase request not found';
+  END IF;
+
+  IF v_status <> 'pending' THEN
+    RAISE EXCEPTION 'Purchase request is already processed (%)', v_status;
+  END IF;
+
+  UPDATE public.credit_purchases
+  SET
+    status = 'completed',
+    reviewed_at = NOW(),
+    reviewed_by = auth.uid()
+  WHERE id = p_purchase_id;
+
+  UPDATE public.profiles
+  SET
+    credits = credits + v_credits,
+    updated_at = NOW()
+  WHERE id = v_user_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.reject_credit_purchase(uuid, text);
+
+CREATE OR REPLACE FUNCTION public.reject_credit_purchase(
+  p_purchase_id UUID,
+  p_rejection_reason TEXT
+)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_status TEXT;
+BEGIN
+  IF auth.uid() IS NULL OR NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Permission denied: only admins may reject credit purchases';
+  END IF;
+
+  SELECT status INTO v_status
+  FROM public.credit_purchases
+  WHERE id = p_purchase_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Purchase request not found';
+  END IF;
+
+  IF v_status <> 'pending' THEN
+    RAISE EXCEPTION 'Purchase request is already processed (%)', v_status;
+  END IF;
+
+  UPDATE public.credit_purchases
+  SET
+    status = 'rejected',
+    rejection_reason = p_rejection_reason,
+    reviewed_at = NOW(),
+    reviewed_by = auth.uid()
+  WHERE id = p_purchase_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+
+-- SECTION 5: OUTSIDE TRIPS & OUTSIDE REQUESTS
+-- 1. Trip Announcements Table (Column is creator_id NOT traveler_id)
+CREATE TABLE IF NOT EXISTS public.outside_trips (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  creator_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  origin TEXT NOT NULL DEFAULT 'College',
+  destination TEXT NOT NULL,
+  departure_date DATE NOT NULL,
+  departure_time TEXT DEFAULT NULL,
+  return_date DATE DEFAULT NULL,
+  return_time TEXT DEFAULT NULL,
+  help_types TEXT[] NOT NULL DEFAULT '{}',
+  note TEXT DEFAULT NULL,
+  status TEXT NOT NULL DEFAULT 'ACTIVE',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ensure all columns exist on outside_trips
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS creator_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS origin TEXT NOT NULL DEFAULT 'College';
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS destination TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS departure_date DATE NOT NULL DEFAULT CURRENT_DATE;
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS departure_time TEXT DEFAULT NULL;
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS return_date DATE DEFAULT NULL;
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS return_time TEXT DEFAULT NULL;
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS help_types TEXT[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS note TEXT DEFAULT NULL;
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'ACTIVE';
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.outside_trips ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE public.outside_trips ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can view planned trips" ON public.outside_trips;
+DROP POLICY IF EXISTS "Users can view active outside trips" ON public.outside_trips;
+CREATE POLICY "Users can view active outside trips"
+  ON public.outside_trips FOR SELECT
+  USING (
+    status = 'ACTIVE' 
+    OR auth.uid() = creator_id
+    OR public.is_admin()
+  );
+
+DROP POLICY IF EXISTS "Users can create trips" ON public.outside_trips;
+DROP POLICY IF EXISTS "Creators can insert their own trips" ON public.outside_trips;
+CREATE POLICY "Creators can insert their own trips"
+  ON public.outside_trips FOR INSERT
+  WITH CHECK (auth.uid() = creator_id AND public.is_approved_student());
+
+DROP POLICY IF EXISTS "Travelers can update their own trips" ON public.outside_trips;
+DROP POLICY IF EXISTS "Creators can update their own trips" ON public.outside_trips;
+CREATE POLICY "Creators can update their own trips"
+  ON public.outside_trips FOR UPDATE
+  USING (auth.uid() = creator_id AND public.is_approved_student())
+  WITH CHECK (auth.uid() = creator_id AND public.is_approved_student());
+
+-- 2. Outside Requests Table
+CREATE TABLE IF NOT EXISTS public.outside_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  requester_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  carrier_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  request_type TEXT NOT NULL,
+  destination TEXT NOT NULL,
+  description TEXT NOT NULL,
+  preferred_date TIMESTAMPTZ NOT NULL,
+  instructions TEXT DEFAULT '',
+  suggested_reward INTEGER NOT NULL,
+  final_reward INTEGER DEFAULT NULL,
+  reward_proposal NUMERIC(10,2) DEFAULT NULL,
+  reward_proposer_id UUID DEFAULT NULL REFERENCES public.profiles(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'OPEN',
+  payment_status TEXT NOT NULL DEFAULT 'Pending',
+  payment_qr_url TEXT DEFAULT NULL,
+  contact_shared BOOLEAN NOT NULL DEFAULT FALSE,
+  requester_contact TEXT DEFAULT NULL,
+  carrier_contact TEXT DEFAULT NULL,
+  trip_id UUID REFERENCES public.outside_trips(id) ON DELETE SET NULL DEFAULT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ensure all columns exist on outside_requests
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS carrier_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'other';
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS destination TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS preferred_date TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS instructions TEXT DEFAULT '';
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS suggested_reward INTEGER NOT NULL DEFAULT 50;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS final_reward INTEGER DEFAULT NULL;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS reward_proposal NUMERIC(10,2) DEFAULT NULL;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS reward_proposer_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'OPEN';
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'Pending';
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS payment_qr_url TEXT DEFAULT NULL;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS contact_shared BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS requester_contact TEXT DEFAULT NULL;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS carrier_contact TEXT DEFAULT NULL;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS trip_id UUID REFERENCES public.outside_trips(id) ON DELETE SET NULL DEFAULT NULL;
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.outside_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE public.outside_requests ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public can view open outside requests" ON public.outside_requests;
+DROP POLICY IF EXISTS "Anyone can view open outside requests" ON public.outside_requests;
+DROP POLICY IF EXISTS "Users can view open or their own outside requests" ON public.outside_requests;
+CREATE POLICY "Users can view open or their own outside requests"
+  ON public.outside_requests FOR SELECT
+  USING (
+    status = 'OPEN' 
+    OR status = 'REQUESTED'
+    OR auth.uid() = requester_id 
+    OR auth.uid() = carrier_id
+    OR public.is_admin()
+  );
+
+DROP POLICY IF EXISTS "Users can create outside requests" ON public.outside_requests;
+DROP POLICY IF EXISTS "Approved students can create outside requests" ON public.outside_requests;
+CREATE POLICY "Approved students can create outside requests"
+  ON public.outside_requests FOR INSERT
+  WITH CHECK (auth.uid() = requester_id AND public.is_approved_student());
+
+DROP POLICY IF EXISTS "Participants can update outside requests" ON public.outside_requests;
+DROP POLICY IF EXISTS "Requesters and carriers can update outside requests" ON public.outside_requests;
+CREATE POLICY "Requesters and carriers can update outside requests"
+  ON public.outside_requests FOR UPDATE
+  USING (auth.uid() IN (requester_id, carrier_id) AND public.is_approved_student());
+
+DROP TRIGGER IF EXISTS trg_check_status_outside_requests ON public.outside_requests;
+CREATE TRIGGER trg_check_status_outside_requests
+  BEFORE INSERT ON public.outside_requests
+  FOR EACH ROW EXECUTE FUNCTION public.check_user_status();
+
+-- 3. Outside Messages Table
+CREATE TABLE IF NOT EXISTS public.outside_messages (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  request_id UUID NOT NULL REFERENCES public.outside_requests(id) ON DELETE CASCADE,
+  sender_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  content TEXT NOT NULL,
+  is_system BOOLEAN NOT NULL DEFAULT FALSE,
+  proposal_amount INTEGER DEFAULT NULL,
+  proposal_status TEXT DEFAULT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ensure all columns exist on outside_messages
+ALTER TABLE public.outside_messages ADD COLUMN IF NOT EXISTS request_id UUID REFERENCES public.outside_requests(id) ON DELETE CASCADE;
+ALTER TABLE public.outside_messages ADD COLUMN IF NOT EXISTS sender_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+ALTER TABLE public.outside_messages ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.outside_messages ADD COLUMN IF NOT EXISTS is_system BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.outside_messages ADD COLUMN IF NOT EXISTS proposal_amount INTEGER DEFAULT NULL;
+ALTER TABLE public.outside_messages ADD COLUMN IF NOT EXISTS proposal_status TEXT DEFAULT NULL;
+ALTER TABLE public.outside_messages ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE public.outside_messages ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Participants can view messages" ON public.outside_messages;
+DROP POLICY IF EXISTS "Users can view messages for requests they are part of" ON public.outside_messages;
+CREATE POLICY "Users can view messages for requests they are part of"
+  ON public.outside_messages FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.outside_requests r
+      WHERE r.id = outside_messages.request_id
+        AND (auth.uid() = r.requester_id OR auth.uid() = r.carrier_id)
+    )
+    OR public.is_admin()
+  );
+
+DROP POLICY IF EXISTS "Participants can send messages" ON public.outside_messages;
+DROP POLICY IF EXISTS "Users can insert messages into their requests" ON public.outside_messages;
+CREATE POLICY "Users can insert messages into their requests"
+  ON public.outside_messages FOR INSERT
+  WITH CHECK (
+    EXISTS (
+      SELECT 1 FROM public.outside_requests r
+      WHERE r.id = outside_messages.request_id
+        AND (auth.uid() = r.requester_id OR auth.uid() = r.carrier_id)
+    )
+    AND (sender_id IS NULL OR sender_id = auth.uid())
+    AND public.is_approved_student()
+  );
+
+DROP POLICY IF EXISTS "Users can update their proposal messages" ON public.outside_messages;
+CREATE POLICY "Users can update their proposal messages"
+  ON public.outside_messages FOR UPDATE
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.outside_requests r
+      WHERE r.id = outside_messages.request_id
+        AND (auth.uid() = r.requester_id OR auth.uid() = r.carrier_id)
+    )
+    AND public.is_approved_student()
+  );
+
+-- Outside Request Triggers
+DROP TRIGGER IF EXISTS protect_outside_request_transitions_trg ON public.outside_requests;
+
+CREATE OR REPLACE FUNCTION public.protect_outside_request_transitions()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF NEW.id <> OLD.id OR NEW.requester_id <> OLD.requester_id THEN
+    RAISE EXCEPTION 'Invalid operation: id and requester_id cannot be changed';
+  END IF;
+
+  IF auth.uid() = OLD.carrier_id AND auth.uid() <> OLD.requester_id THEN
+    IF NEW.status = 'ACCEPTED' AND OLD.status <> 'ACCEPTED' THEN
+      RAISE EXCEPTION 'Only the requester can accept a reward proposal';
+    END IF;
+
+    IF NEW.payment_status = 'Sent' AND OLD.payment_status <> 'Sent' THEN
+      RAISE EXCEPTION 'Only the requester can mark payment as Sent';
+    END IF;
+  END IF;
+
+  IF auth.uid() = OLD.requester_id THEN
+    IF NEW.payment_qr_url IS DISTINCT FROM OLD.payment_qr_url THEN
+      RAISE EXCEPTION 'Only the carrier can upload payment details';
+    END IF;
+
+    IF NEW.payment_status IN ('Confirmed', 'Received') AND OLD.payment_status NOT IN ('Confirmed', 'Received') THEN
+      RAISE EXCEPTION 'Only the carrier can confirm payment receipt';
+    END IF;
+
+    IF (NEW.status IN ('IN PROGRESS', 'TASK_STARTED', 'COMPLETED')) AND NEW.status <> OLD.status THEN
+      RAISE EXCEPTION 'Only the carrier can advance task execution status';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER protect_outside_request_transitions_trg
+  BEFORE UPDATE ON public.outside_requests
+  FOR EACH ROW EXECUTE FUNCTION public.protect_outside_request_transitions();
+
+DROP TRIGGER IF EXISTS trg_outside_status_change ON public.outside_requests;
+
+CREATE OR REPLACE FUNCTION public.handle_outside_request_status_change()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_carrier_name TEXT;
+BEGIN
+  -- Carrier claims the request
+  IF OLD.carrier_id IS NULL AND NEW.carrier_id IS NOT NULL THEN
+    SELECT full_name INTO v_carrier_name FROM public.profiles WHERE id = NEW.carrier_id;
+    INSERT INTO public.outside_messages (request_id, sender_id, content, is_system)
+    VALUES (NEW.id, NULL, COALESCE(v_carrier_name, 'Carrier') || ' joined negotiation.', TRUE);
+  END IF;
+
+  -- Status transitions
+  IF OLD.status IS DISTINCT FROM NEW.status THEN
+    IF NEW.status = 'ACCEPTED' THEN
+      INSERT INTO public.outside_messages (request_id, sender_id, content, is_system)
+      VALUES (NEW.id, NULL, 'Task reward agreed! Status advanced to ACCEPTED.', TRUE);
+    ELSIF NEW.status = 'PAYMENT PENDING' THEN
+      INSERT INTO public.outside_messages (request_id, sender_id, content, is_system)
+      VALUES (NEW.id, NULL, 'Payment details uploaded. Status is now PAYMENT PENDING.', TRUE);
+    ELSIF NEW.status = 'PAID' THEN
+      INSERT INTO public.outside_messages (request_id, sender_id, content, is_system)
+      VALUES (NEW.id, NULL, 'Payment confirmed! Task status advanced to PAID.', TRUE);
+    ELSIF NEW.status IN ('IN PROGRESS', 'TASK_STARTED') THEN
+      INSERT INTO public.outside_messages (request_id, sender_id, content, is_system)
+      VALUES (NEW.id, NULL, 'Task is now IN PROGRESS.', TRUE);
+    ELSIF NEW.status = 'COMPLETED' THEN
+      INSERT INTO public.outside_messages (request_id, sender_id, content, is_system)
+      VALUES (NEW.id, NULL, 'Task marked as COMPLETED! 🎉', TRUE);
+    ELSIF NEW.status = 'CANCELLED' THEN
+      INSERT INTO public.outside_messages (request_id, sender_id, content, is_system)
+      VALUES (NEW.id, NULL, 'Task was cancelled.', TRUE);
+    END IF;
+  END IF;
+
+  -- Payment status changes
+  IF OLD.payment_status IS DISTINCT FROM NEW.payment_status THEN
+    IF NEW.payment_status = 'Sent' THEN
+      INSERT INTO public.outside_messages (request_id, sender_id, content, is_system)
+      VALUES (NEW.id, NULL, 'Payment marked as Sent. Waiting for Carrier confirmation.', TRUE);
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_outside_status_change
+  AFTER UPDATE OF status, payment_status, carrier_id ON public.outside_requests
+  FOR EACH ROW EXECUTE FUNCTION public.handle_outside_request_status_change();
+
+-- Outside Task RPCs
+DROP FUNCTION IF EXISTS public.claim_outside_request(uuid);
+
+CREATE OR REPLACE FUNCTION public.claim_outside_request(p_request_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  IF NOT public.is_approved_student() THEN
+    RAISE EXCEPTION 'User not approved for outside tasks';
+  END IF;
+
+  UPDATE public.outside_requests
+  SET carrier_id = auth.uid(), status = 'NEGOTIATING', updated_at = NOW()
+  WHERE id = p_request_id AND status = 'OPEN' AND carrier_id IS NULL;
+
+  RETURN FOUND;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.propose_outside_reward(uuid, integer);
+DROP FUNCTION IF EXISTS public.propose_outside_reward(uuid, numeric);
+DROP FUNCTION IF EXISTS public.propose_outside_reward(uuid, int);
+
+CREATE OR REPLACE FUNCTION public.propose_outside_reward(p_request_id UUID, p_amount INTEGER)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_requester_id UUID;
+  v_carrier_id UUID;
+  v_profile_name TEXT;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT requester_id, carrier_id INTO v_requester_id, v_carrier_id
+  FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() <> v_requester_id AND auth.uid() <> v_carrier_id THEN
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+
+  SELECT full_name INTO v_profile_name FROM public.profiles WHERE id = auth.uid();
+
+  INSERT INTO public.outside_messages (request_id, sender_id, content, proposal_amount, proposal_status, is_system)
+  VALUES (p_request_id, auth.uid(), COALESCE(v_profile_name, 'Student') || ' proposed a cash reward of ₹' || p_amount, p_amount, 'pending', FALSE);
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.accept_outside_reward(uuid, integer);
+DROP FUNCTION IF EXISTS public.accept_outside_reward(uuid, numeric);
+DROP FUNCTION IF EXISTS public.accept_outside_reward(uuid, int);
+
+CREATE OR REPLACE FUNCTION public.accept_outside_reward(p_request_id UUID, p_amount INTEGER)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_requester_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT requester_id INTO v_requester_id FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() <> v_requester_id THEN
+    RAISE EXCEPTION 'Only requester can accept proposal';
+  END IF;
+
+  UPDATE public.outside_requests
+  SET final_reward = p_amount, status = 'ACCEPTED', updated_at = NOW()
+  WHERE id = p_request_id;
+
+  UPDATE public.outside_messages
+  SET proposal_status = 'accepted'
+  WHERE request_id = p_request_id AND proposal_amount = p_amount AND proposal_status = 'pending';
+
+  UPDATE public.outside_messages
+  SET proposal_status = 'rejected'
+  WHERE request_id = p_request_id AND proposal_amount <> p_amount AND proposal_status = 'pending';
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.set_outside_payment_qr(uuid, text);
+
+CREATE OR REPLACE FUNCTION public.set_outside_payment_qr(p_request_id UUID, p_qr_url TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_carrier_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT carrier_id INTO v_carrier_id FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() <> v_carrier_id THEN
+    RAISE EXCEPTION 'Only carrier can upload payment details';
+  END IF;
+
+  UPDATE public.outside_requests
+  SET payment_qr_url = p_qr_url, status = 'PAYMENT PENDING', updated_at = NOW()
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.mark_outside_payment_sent(uuid);
+
+CREATE OR REPLACE FUNCTION public.mark_outside_payment_sent(p_request_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_requester_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT requester_id INTO v_requester_id FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() <> v_requester_id THEN
+    RAISE EXCEPTION 'Only requester can mark payment as Sent';
+  END IF;
+
+  UPDATE public.outside_requests
+  SET payment_status = 'Sent', updated_at = NOW()
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.confirm_outside_payment_received(uuid);
+
+CREATE OR REPLACE FUNCTION public.confirm_outside_payment_received(p_request_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_carrier_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT carrier_id INTO v_carrier_id FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() <> v_carrier_id THEN
+    RAISE EXCEPTION 'Only carrier can confirm payment receipt';
+  END IF;
+
+  UPDATE public.outside_requests
+  SET payment_status = 'Confirmed', status = 'PAID', updated_at = NOW()
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.start_outside_task(uuid);
+
+CREATE OR REPLACE FUNCTION public.start_outside_task(p_request_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_carrier_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT carrier_id INTO v_carrier_id FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() <> v_carrier_id THEN
+    RAISE EXCEPTION 'Only carrier can advance task status to In Progress';
+  END IF;
+
+  UPDATE public.outside_requests
+  SET status = 'IN PROGRESS', updated_at = NOW()
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.complete_outside_task(uuid);
+
+CREATE OR REPLACE FUNCTION public.complete_outside_task(p_request_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_carrier_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT carrier_id INTO v_carrier_id FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() <> v_carrier_id THEN
+    RAISE EXCEPTION 'Only carrier can complete task';
+  END IF;
+
+  UPDATE public.outside_requests
+  SET status = 'COMPLETED', updated_at = NOW()
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.cancel_outside_request(uuid);
+
+CREATE OR REPLACE FUNCTION public.cancel_outside_request(p_request_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_requester_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT requester_id INTO v_requester_id FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() <> v_requester_id THEN
+    RAISE EXCEPTION 'Only requester can cancel request';
+  END IF;
+
+  UPDATE public.outside_requests
+  SET status = 'CANCELLED', updated_at = NOW()
+  WHERE id = p_request_id;
+
+  RETURN TRUE;
+END;
+$$;
+
+DROP FUNCTION IF EXISTS public.share_outside_contact(uuid, text);
+
+CREATE OR REPLACE FUNCTION public.share_outside_contact(p_request_id UUID, p_contact TEXT)
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_requester_id UUID;
+  v_carrier_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Not authenticated';
+  END IF;
+
+  SELECT requester_id, carrier_id INTO v_requester_id, v_carrier_id
+  FROM public.outside_requests WHERE id = p_request_id;
+
+  IF auth.uid() = v_requester_id THEN
+    UPDATE public.outside_requests
+    SET requester_contact = p_contact, contact_shared = TRUE, updated_at = NOW()
+    WHERE id = p_request_id;
+  ELSIF auth.uid() = v_carrier_id THEN
+    UPDATE public.outside_requests
+    SET carrier_contact = p_contact, contact_shared = TRUE, updated_at = NOW()
+    WHERE id = p_request_id;
+  ELSE
+    RAISE EXCEPTION 'Unauthorized';
+  END IF;
+
+  RETURN TRUE;
+END;
+$$;
+
+
+-- SECTION 6: BROADCASTS & PEER REVIEWS
+CREATE TABLE IF NOT EXISTS public.broadcasts (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  creator_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  message TEXT NOT NULL CHECK (char_length(message) <= 500),
+  destination TEXT DEFAULT NULL,
+  scheduled_date DATE DEFAULT NULL,
+  scheduled_time TIME DEFAULT NULL,
+  category TEXT NOT NULL DEFAULT 'general' CHECK (category IN ('going_out', 'need_help', 'general')),
+  status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ensure all columns exist on broadcasts
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS creator_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS message TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS destination TEXT DEFAULT NULL;
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS scheduled_date DATE DEFAULT NULL;
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS scheduled_time TIME DEFAULT NULL;
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'general';
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE public.broadcasts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_broadcasts_creator_id ON public.broadcasts (creator_id);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_status ON public.broadcasts (status);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_category ON public.broadcasts (category);
+CREATE INDEX IF NOT EXISTS idx_broadcasts_created_at ON public.broadcasts (created_at DESC);
+
+DROP TRIGGER IF EXISTS trg_broadcasts_updated_at ON public.broadcasts;
+CREATE TRIGGER trg_broadcasts_updated_at
+  BEFORE UPDATE ON public.broadcasts
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+ALTER TABLE public.broadcasts ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "broadcasts_select_authenticated" ON public.broadcasts;
+CREATE POLICY "broadcasts_select_authenticated"
+  ON public.broadcasts FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "broadcasts_insert_approved" ON public.broadcasts;
+CREATE POLICY "broadcasts_insert_approved"
+  ON public.broadcasts FOR INSERT
+  WITH CHECK (public.is_approved_student());
+
+DROP POLICY IF EXISTS "broadcasts_update_own" ON public.broadcasts;
+CREATE POLICY "broadcasts_update_own"
+  ON public.broadcasts FOR UPDATE
+  USING (creator_id = auth.uid())
+  WITH CHECK (creator_id = auth.uid());
+
+DROP POLICY IF EXISTS "broadcasts_delete_own" ON public.broadcasts;
+CREATE POLICY "broadcasts_delete_own"
+  ON public.broadcasts FOR DELETE
+  USING (creator_id = auth.uid());
+
+-- Reviews Table
+CREATE TABLE IF NOT EXISTS public.reviews (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reviewer_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  reviewee_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  request_type TEXT NOT NULL CHECK (request_type IN ('campus', 'outside')),
+  request_id UUID NOT NULL,
+  rating INTEGER NOT NULL CHECK (rating >= 1 AND rating <= 5),
+  comment TEXT DEFAULT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT uq_reviews_reviewer_request UNIQUE (reviewer_id, request_id),
+  CONSTRAINT chk_reviews_no_self_review CHECK (reviewer_id <> reviewee_id)
+);
+
+-- Ensure all columns exist on reviews
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS reviewer_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS reviewee_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS request_type TEXT NOT NULL DEFAULT 'campus';
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS request_id UUID;
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS rating INTEGER NOT NULL DEFAULT 5;
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS comment TEXT DEFAULT NULL;
+ALTER TABLE public.reviews ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_reviews_reviewer_id ON public.reviews (reviewer_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_reviewee_id ON public.reviews (reviewee_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_request_id ON public.reviews (request_id);
+CREATE INDEX IF NOT EXISTS idx_reviews_request_type ON public.reviews (request_type);
+
+ALTER TABLE public.reviews ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "reviews_select_authenticated" ON public.reviews;
+CREATE POLICY "reviews_select_authenticated"
+  ON public.reviews FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "reviews_insert_approved" ON public.reviews;
+CREATE POLICY "reviews_insert_approved"
+  ON public.reviews FOR INSERT
+  WITH CHECK (public.is_approved_student() AND reviewer_id = auth.uid());
+
+
+-- SECTION 7: ADMIN PAYMENT SETTINGS
+CREATE TABLE IF NOT EXISTS public.payment_settings (
+  id UUID PRIMARY KEY DEFAULT '00000000-0000-0000-0000-000000000000'::uuid,
+  upi_id TEXT NOT NULL,
+  qr_image_path TEXT DEFAULT NULL,
+  updated_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT single_row CHECK (id = '00000000-0000-0000-0000-000000000000'::uuid)
+);
+
+ALTER TABLE public.payment_settings ADD COLUMN IF NOT EXISTS upi_id TEXT NOT NULL DEFAULT 'unifetch@upi';
+ALTER TABLE public.payment_settings ADD COLUMN IF NOT EXISTS qr_image_path TEXT DEFAULT NULL;
+ALTER TABLE public.payment_settings ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL;
+ALTER TABLE public.payment_settings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE public.payment_settings ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Anyone can view payment settings" ON public.payment_settings;
+CREATE POLICY "Anyone can view payment settings"
+  ON public.payment_settings FOR SELECT
+  USING (auth.role() = 'authenticated');
+
+DROP POLICY IF EXISTS "Admins can manage payment settings" ON public.payment_settings;
+CREATE POLICY "Admins can manage payment settings"
+  ON public.payment_settings FOR ALL
+  USING (public.is_admin());
+
+INSERT INTO public.payment_settings (id, upi_id)
+VALUES ('00000000-0000-0000-0000-000000000000'::uuid, 'unifetch@upi')
+ON CONFLICT (id) DO NOTHING;
+
+
+-- SECTION 8: NOTIFICATIONS & USER PREFERENCES
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  message TEXT NOT NULL,
+  link TEXT DEFAULT NULL,
+  source_type TEXT DEFAULT NULL,
+  source_id UUID DEFAULT NULL,
+  read BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Ensure all columns exist on notifications
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS type TEXT NOT NULL DEFAULT 'INFO';
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS message TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS link TEXT DEFAULT NULL;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS source_type TEXT DEFAULT NULL;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS source_id UUID DEFAULT NULL;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS read BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.notifications ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON public.notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON public.notifications(read);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_unique_source 
+  ON public.notifications(user_id, source_type, source_id);
+
+DROP POLICY IF EXISTS "Users can read their own notifications" ON public.notifications;
+CREATE POLICY "Users can read their own notifications"
+  ON public.notifications FOR SELECT
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update their own notifications" ON public.notifications;
+CREATE POLICY "Users can update their own notifications"
+  ON public.notifications FOR UPDATE
+  USING (auth.uid() = user_id);
+
+CREATE TABLE IF NOT EXISTS public.notification_preferences (
+  user_id UUID PRIMARY KEY REFERENCES public.profiles(id) ON DELETE CASCADE,
+  email_requests BOOLEAN NOT NULL DEFAULT TRUE,
+  email_payments BOOLEAN NOT NULL DEFAULT TRUE,
+  email_credits BOOLEAN NOT NULL DEFAULT TRUE,
+  email_tasks BOOLEAN NOT NULL DEFAULT TRUE,
+  email_messages BOOLEAN NOT NULL DEFAULT FALSE,
+  push_requests BOOLEAN NOT NULL DEFAULT TRUE,
+  push_messages BOOLEAN NOT NULL DEFAULT TRUE,
+  push_payments BOOLEAN NOT NULL DEFAULT TRUE,
+  push_tasks BOOLEAN NOT NULL DEFAULT TRUE,
+  push_reviews BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS email_requests BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS email_payments BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS email_credits BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS email_tasks BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS email_messages BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS push_requests BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS push_messages BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS push_payments BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS push_tasks BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS push_reviews BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE public.notification_preferences ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+ALTER TABLE public.notification_preferences ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can read their own preferences" ON public.notification_preferences;
+CREATE POLICY "Users can read their own preferences"
+  ON public.notification_preferences FOR SELECT
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update their own preferences" ON public.notification_preferences;
+CREATE POLICY "Users can update their own preferences"
+  ON public.notification_preferences FOR UPDATE
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert their own preferences" ON public.notification_preferences;
+CREATE POLICY "Users can insert their own preferences"
+  ON public.notification_preferences FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
+
+INSERT INTO public.notification_preferences (user_id)
+SELECT id FROM public.profiles
+ON CONFLICT (user_id) DO NOTHING;
+
+DROP TRIGGER IF EXISTS trg_create_user_preferences ON public.profiles;
+
+CREATE OR REPLACE FUNCTION public.handle_new_user_preferences()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.notification_preferences (user_id)
+  VALUES (NEW.id)
+  ON CONFLICT (user_id) DO NOTHING;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_create_user_preferences
+  AFTER INSERT ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user_preferences();
+
+-- Notification trigger for Campus requests
+DROP TRIGGER IF EXISTS trg_package_request_notifications ON public.package_requests;
+
+CREATE OR REPLACE FUNCTION public.trg_package_request_notifications()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+    VALUES (
+      NEW.requester_id, 'REQUEST_CREATED', 'Campus Request Created',
+      'Your campus request has been created.', '/requests', 'campus_created', NEW.id
+    ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.status = 'pending' AND NEW.status = 'matched' AND NEW.carrier_id IS NOT NULL THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.requester_id, 'REQUEST_ACCEPTED', 'Campus Request Accepted',
+        'Someone accepted your campus delivery request.', '/requests', 'campus_accepted', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF OLD.status <> 'delivered' AND NEW.status = 'delivered' AND NEW.otp_verified = TRUE THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.requester_id, 'TASK_COMPLETED', 'Campus Delivery Complete',
+        'Your campus delivery is complete.', '/requests', 'campus_completed_requester', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+
+      IF NEW.carrier_id IS NOT NULL THEN
+        INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+        VALUES (
+          NEW.carrier_id, 'CARRIER_REWARD', 'Credits Earned!',
+          'You earned 35 Credits.', '/carry', 'campus_completed_carrier', NEW.id
+        ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_package_request_notifications
+  AFTER INSERT OR UPDATE ON public.package_requests
+  FOR EACH ROW EXECUTE FUNCTION public.trg_package_request_notifications();
+
+-- Notification trigger for Outside tasks
+DROP TRIGGER IF EXISTS trg_outside_request_notifications ON public.outside_requests;
+
+CREATE OR REPLACE FUNCTION public.trg_outside_request_notifications()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_carrier_name TEXT;
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.status = 'OPEN' AND NEW.status = 'NEGOTIATING' AND NEW.carrier_id IS NOT NULL THEN
+      SELECT full_name INTO v_carrier_name FROM public.profiles WHERE id = NEW.carrier_id;
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.requester_id, 'REQUEST_ACCEPTED', 'Outside Task Claimed',
+        COALESCE(v_carrier_name, 'A student') || ' accepted your request.', '/outside/' || NEW.id, 'outside_claimed', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF OLD.status = 'NEGOTIATING' AND NEW.status = 'ACCEPTED' AND NEW.final_reward IS NOT NULL THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.carrier_id, 'REWARD_AGREED', 'Reward Agreed',
+        'Reward agreed: ₹' || NEW.final_reward || '.', '/outside/' || NEW.id, 'outside_agreed_carrier', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.requester_id, 'REWARD_AGREED', 'Reward Agreed',
+        'Reward agreed: ₹' || NEW.final_reward || '.', '/outside/' || NEW.id, 'outside_agreed_requester', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF (OLD.payment_qr_url IS NULL OR OLD.payment_qr_url = '') AND NEW.payment_qr_url IS NOT NULL AND NEW.payment_qr_url <> '' THEN
+      SELECT full_name INTO v_carrier_name FROM public.profiles WHERE id = NEW.carrier_id;
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.requester_id, 'PAYMENT_DETAILS_SHARED', 'Payment Details Shared',
+        'Payment details shared by ' || COALESCE(v_carrier_name, 'carrier') || '.', '/outside/' || NEW.id, 'outside_details_shared', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF OLD.payment_status = 'Pending' AND NEW.payment_status = 'Sent' THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.carrier_id, 'PAYMENT_SENT', 'Payment Marked Sent',
+        'Payment marked as sent. Please verify receipt.', '/outside/' || NEW.id, 'outside_payment_sent', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF (OLD.payment_status NOT IN ('Confirmed', 'Received')) AND (NEW.payment_status IN ('Confirmed', 'Received')) THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.requester_id, 'PAYMENT_CONFIRMED', 'Payment Confirmed',
+        'Carrier confirmed payment receipt.', '/outside/' || NEW.id, 'outside_payment_received', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF (OLD.status NOT IN ('IN PROGRESS', 'TASK_STARTED')) AND (NEW.status IN ('IN PROGRESS', 'TASK_STARTED')) THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.requester_id, 'TASK_STARTED', 'Task In Progress',
+        'Carrier is currently fulfilling your request.', '/outside/' || NEW.id, 'outside_task_started', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF OLD.status <> 'COMPLETED' AND NEW.status = 'COMPLETED' THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.requester_id, 'TASK_COMPLETED', 'Outside Delivery Complete',
+        'Your outside delivery has been completed.', '/outside/' || NEW.id, 'outside_completed_requester', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.carrier_id, 'TASK_COMPLETED', 'Task Complete',
+        'Outside task completed.', '/outside/' || NEW.id, 'outside_completed_carrier', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF OLD.status <> 'CANCELLED' AND NEW.status = 'CANCELLED' THEN
+      IF auth.uid() = NEW.requester_id AND NEW.carrier_id IS NOT NULL THEN
+        INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+        VALUES (
+          NEW.carrier_id, 'REQUEST_CANCELLED', 'Request Cancelled',
+          'The requester cancelled this request.', '/outside/' || NEW.id, 'outside_cancelled_carrier', NEW.id
+        ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+      ELSIF auth.uid() = NEW.carrier_id THEN
+        INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+        VALUES (
+          NEW.requester_id, 'REQUEST_CANCELLED', 'Request Cancelled',
+          'The carrier cancelled this request.', '/outside/' || NEW.id, 'outside_cancelled_requester', NEW.id
+        ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_outside_request_notifications
+  AFTER UPDATE ON public.outside_requests
+  FOR EACH ROW EXECUTE FUNCTION public.trg_outside_request_notifications();
+
+-- Notification trigger for Outside Messages
+DROP TRIGGER IF EXISTS trg_outside_message_notifications ON public.outside_messages;
+
+CREATE OR REPLACE FUNCTION public.trg_outside_message_notifications()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_recipient_id UUID;
+  v_sender_name TEXT;
+  v_req RECORD;
+BEGIN
+  IF NEW.is_system = FALSE THEN
+    SELECT requester_id, carrier_id INTO v_req
+    FROM public.outside_requests WHERE id = NEW.request_id;
+
+    IF FOUND THEN
+      IF NEW.sender_id = v_req.requester_id THEN
+        v_recipient_id := v_req.carrier_id;
+      ELSE
+        v_recipient_id := v_req.requester_id;
+      END IF;
+
+      IF v_recipient_id IS NOT NULL THEN
+        SELECT full_name INTO v_sender_name FROM public.profiles WHERE id = NEW.sender_id;
+
+        IF NEW.proposal_amount IS NOT NULL THEN
+          INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+          VALUES (
+            v_recipient_id, 'REWARD_PROPOSAL', 'New Reward Proposal',
+            COALESCE(v_sender_name, 'Student') || ' proposed a cash reward of ₹' || NEW.proposal_amount || '.',
+            '/outside/' || NEW.request_id, 'outside_proposal_' || NEW.id, NEW.id
+          ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+        ELSE
+          INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+          VALUES (
+            v_recipient_id, 'NEW_MESSAGE', 'New Message',
+            COALESCE(v_sender_name, 'Student') || ': ' || substring(NEW.content from 1 for 60),
+            '/outside/' || NEW.request_id, 'outside_msg_' || NEW.id, NEW.id
+          ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+        END IF;
+      END IF;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_outside_message_notifications
+  AFTER INSERT ON public.outside_messages
+  FOR EACH ROW EXECUTE FUNCTION public.trg_outside_message_notifications();
+
+-- Notification trigger for Credit purchases
+DROP TRIGGER IF EXISTS trg_credit_purchase_notifications ON public.credit_purchases;
+
+CREATE OR REPLACE FUNCTION public.trg_credit_purchase_notifications()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+    VALUES (
+      NEW.user_id, 'CREDIT_PURCHASE_SUBMITTED', 'Credit Purchase Submitted',
+      'Credit purchase submitted.', '/credits', 'credit_submitted', NEW.id
+    ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    IF OLD.status = 'pending' AND NEW.status = 'completed' THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.user_id, 'CREDITS_ADDED', 'Credits Added',
+        NEW.credits || ' Credits have been added to your account.', '/credits', 'credit_approved', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+
+    IF OLD.status = 'pending' AND NEW.status = 'rejected' THEN
+      INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+      VALUES (
+        NEW.user_id, 'CREDIT_PURCHASE_REJECTED', 'Credit Purchase Rejected',
+        'Your Credit purchase was rejected.' || COALESCE(' Reason: ' || NEW.rejection_reason, ''),
+        '/credits', 'credit_rejected', NEW.id
+      ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_credit_purchase_notifications
+  AFTER INSERT OR UPDATE ON public.credit_purchases
+  FOR EACH ROW EXECUTE FUNCTION public.trg_credit_purchase_notifications();
+
+-- Notification trigger for Reviews
+DROP TRIGGER IF EXISTS trg_review_notifications ON public.reviews;
+
+CREATE OR REPLACE FUNCTION public.trg_review_notifications()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.notifications (user_id, type, title, message, link, source_type, source_id)
+  VALUES (
+    NEW.reviewee_id, 'NEW_REVIEW', 'New Review Received',
+    'You received a new review.',
+    CASE WHEN NEW.request_type = 'campus' THEN '/requests' ELSE '/outside/' || NEW.request_id END,
+    'review_received', NEW.id
+  ) ON CONFLICT (user_id, source_type, source_id) DO NOTHING;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_review_notifications
+  AFTER INSERT ON public.reviews
+  FOR EACH ROW EXECUTE FUNCTION public.trg_review_notifications();
+
+
+-- SECTION 9: SAFETY, MODERATION & BLOCKS
+CREATE TABLE IF NOT EXISTS public.reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reporter_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  reported_user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  request_id UUID DEFAULT NULL,
+  reason TEXT NOT NULL,
+  description TEXT DEFAULT NULL,
+  status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN', 'REVIEWING', 'RESOLVED', 'DISMISSED')),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT no_self_report CHECK (reporter_id <> reported_user_id)
+);
+
+ALTER TABLE public.reports ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'OPEN';
+ALTER TABLE public.reports ADD COLUMN IF NOT EXISTS description TEXT DEFAULT NULL;
+
+ALTER TABLE public.reports ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can read their own submitted reports" ON public.reports;
+CREATE POLICY "Users can read their own submitted reports"
+  ON public.reports FOR SELECT
+  USING (auth.uid() = reporter_id);
+
+DROP POLICY IF EXISTS "Admins can view and manage all reports" ON public.reports;
+CREATE POLICY "Admins can view and manage all reports"
+  ON public.reports FOR ALL
+  USING (public.is_admin());
+
+DROP POLICY IF EXISTS "Users can insert their own reports" ON public.reports;
+CREATE POLICY "Users can insert their own reports"
+  ON public.reports FOR INSERT
+  WITH CHECK (auth.uid() = reporter_id);
+
+-- Blocks Table
+CREATE TABLE IF NOT EXISTS public.blocks (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  blocker_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  blocked_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT no_self_block CHECK (blocker_id <> blocked_id),
+  CONSTRAINT unique_block UNIQUE (blocker_id, blocked_id)
+);
+
+ALTER TABLE public.blocks ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view their own blocks" ON public.blocks;
+CREATE POLICY "Users can view their own blocks"
+  ON public.blocks FOR SELECT
+  USING (auth.uid() = blocker_id);
+
+DROP POLICY IF EXISTS "Users can block others" ON public.blocks;
+CREATE POLICY "Users can block others"
+  ON public.blocks FOR INSERT
+  WITH CHECK (auth.uid() = blocker_id);
+
+DROP POLICY IF EXISTS "Users can unblock others" ON public.blocks;
+CREATE POLICY "Users can unblock others"
+  ON public.blocks FOR DELETE
+  USING (auth.uid() = blocker_id);
+
+
+-- SECTION 10: STORAGE BUCKETS & STORAGE POLICIES
+-- 1. Private Student ID cards
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('student-ids', 'student-ids', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
+
+DROP POLICY IF EXISTS "Students can upload their own student ID" ON storage.objects;
+CREATE POLICY "Students can upload their own student ID"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'student-ids' AND
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+DROP POLICY IF EXISTS "Students can update their own student ID" ON storage.objects;
+CREATE POLICY "Students can update their own student ID"
+  ON storage.objects FOR UPDATE
+  USING (
+    bucket_id = 'student-ids' AND
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+DROP POLICY IF EXISTS "Students can view their own student ID" ON storage.objects;
+CREATE POLICY "Students can view their own student ID"
+  ON storage.objects FOR SELECT
+  USING (
+    bucket_id = 'student-ids' AND
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+DROP POLICY IF EXISTS "Admins have full access to student IDs" ON storage.objects;
+CREATE POLICY "Admins have full access to student IDs"
+  ON storage.objects FOR ALL
+  USING (
+    bucket_id = 'student-ids' AND
+    (SELECT public.is_admin())
+  );
+
+-- 2. Private Payment Proofs
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('payment-proofs', 'payment-proofs', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
+
+DROP POLICY IF EXISTS "Users can upload their own payment proofs" ON storage.objects;
+CREATE POLICY "Users can upload their own payment proofs"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'payment-proofs' AND
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+DROP POLICY IF EXISTS "Users can view their own payment proofs" ON storage.objects;
+CREATE POLICY "Users can view their own payment proofs"
+  ON storage.objects FOR SELECT
+  USING (
+    bucket_id = 'payment-proofs' AND
+    auth.uid()::text = (storage.foldername(name))[1]
+  );
+
+DROP POLICY IF EXISTS "Admins have full access to payment proofs" ON storage.objects;
+CREATE POLICY "Admins have full access to payment proofs"
+  ON storage.objects FOR ALL
+  USING (
+    bucket_id = 'payment-proofs' AND
+    (SELECT public.is_admin())
+  );
+
+-- 3. Public Payment Settings (Admin QR codes)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('payment-settings', 'payment-settings', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Public Access to Payment Settings Storage" ON storage.objects;
+CREATE POLICY "Public Access to Payment Settings Storage"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'payment-settings');
+
+DROP POLICY IF EXISTS "Admin Manage Payment Settings Storage" ON storage.objects;
+CREATE POLICY "Admin Manage Payment Settings Storage"
+  ON storage.objects FOR ALL
+  USING (bucket_id = 'payment-settings' AND (SELECT public.is_admin()));
+
+-- 4. Outside Delivery Storage (QR / proof uploads)
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('outside-delivery', 'outside-delivery', true)
+ON CONFLICT (id) DO UPDATE SET public = true;
+
+DROP POLICY IF EXISTS "Authenticated users can upload outside delivery media" ON storage.objects;
+CREATE POLICY "Authenticated users can upload outside delivery media"
+  ON storage.objects FOR INSERT
+  WITH CHECK (
+    bucket_id = 'outside-delivery' AND
+    auth.role() = 'authenticated'
+  );
+
+DROP POLICY IF EXISTS "Anyone can view outside delivery media" ON storage.objects;
+CREATE POLICY "Anyone can view outside delivery media"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'outside-delivery');
+
+
+-- SECTION 11: SUPABASE REALTIME CONFIGURATION
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'package_requests'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.package_requests;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'outside_requests'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.outside_requests;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'outside_messages'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.outside_messages;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'outside_trips'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.outside_trips;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'broadcasts'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.broadcasts;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'reviews'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.reviews;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'notifications'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.notifications;
+  END IF;
+END;
+$$;
+
+-- END OF CONSOLIDATED MIGRATION SCRIPT

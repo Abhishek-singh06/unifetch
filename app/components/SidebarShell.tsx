@@ -9,17 +9,22 @@ import {
   X,
   Coins,
   ShieldCheck,
+  Settings,
 } from "lucide-react";
 import { useTransition, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
 import { LogoMark } from "./ui/Logo";
 import NavItem from "./NavItem";
+import NotificationCenter from "./NotificationCenter";
 import {
   withinCollegeItems,
   outsideCampusItems,
+  communityItems,
   adminItems,
   SECTION_COLORS,
 } from "@/lib/navConfig";
+import { isDemoMode, disableDemoMode, getDemoUser } from "@/lib/demoSession";
+import DemoBanner from "./DemoBanner";
 
 interface SidebarShellProps {
   children: React.ReactNode;
@@ -33,9 +38,19 @@ export function SidebarShell({ children }: SidebarShellProps) {
   const [studentCredits, setStudentCredits] = useState(100);
   const [userRole, setUserRole] = useState("student");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   useEffect(() => {
     async function loadProfile() {
+      if (isDemoMode()) {
+        setIsDemo(true);
+        const demoUser = getDemoUser();
+        setStudentName(demoUser.full_name || "Demo Student");
+        setStudentCredits(demoUser.credits || 100);
+        setUserRole("student");
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
@@ -56,6 +71,12 @@ export function SidebarShell({ children }: SidebarShellProps) {
   }, []);
 
   async function handleLogout() {
+    if (isDemoMode()) {
+      disableDemoMode();
+      router.push("/");
+      router.refresh();
+      return;
+    }
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
@@ -105,16 +126,19 @@ export function SidebarShell({ children }: SidebarShellProps) {
       {/* 1. Desktop Sidebar */}
       <aside className="hidden md:flex md:w-[280px] shrink-0 flex-col justify-between border-r border-[rgba(255,255,255,0.08)] bg-[#080d16] p-6 z-30 overflow-y-auto">
         <div className="space-y-8">
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-3.5 group">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white border border-primary/20 shadow-primary transition-transform duration-200 group-hover:scale-105">
-              <LogoMark className="h-5.5 w-5.5" />
-            </div>
-            <div>
-              <span className="font-display text-xl font-bold tracking-tight text-white block">UniFetch</span>
-              <span className="block text-[8px] font-extrabold uppercase tracking-widest text-primary mt-1">Campus Logistics</span>
-            </div>
-          </Link>
+          {/* Logo and Notification Center */}
+          <div className="flex items-center justify-between gap-2.5">
+            <Link href="/" className="flex items-center gap-3.5 group">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-white border border-primary/20 shadow-primary transition-transform duration-200 group-hover:scale-105">
+                <LogoMark className="h-5.5 w-5.5" />
+              </div>
+              <div>
+                <span className="font-display text-xl font-bold tracking-tight text-white block">UniFetch</span>
+                <span className="block text-[8px] font-extrabold uppercase tracking-widest text-primary mt-1">Campus Logistics</span>
+              </div>
+            </Link>
+            <NotificationCenter />
+          </div>
 
           {/* Credits Wallet Pill — polished with micro-interaction */}
           <Link href="/credits" aria-label="Go to credits wallet">
@@ -154,6 +178,12 @@ export function SidebarShell({ children }: SidebarShellProps) {
               "Outside Campus",
               outsideCampusItems,
               `text-[${SECTION_COLORS.emerald}]/70`,
+              ""
+            )}
+            {renderNavSection(
+              "Community",
+              communityItems,
+              `text-[${SECTION_COLORS.violet}]/70`,
               ""
             )}
 
@@ -211,15 +241,25 @@ export function SidebarShell({ children }: SidebarShellProps) {
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="h-8.5 w-8.5 rounded-xl bg-white/5 border border-[rgba(255,255,255,0.08)] hover:bg-[#ef4444]/10 hover:border-[#ef4444]/30 active:scale-[0.95] group transition-all flex items-center justify-center shrink-0"
-            title="Sign out"
-            aria-label="Sign out"
-          >
-            <LogOut className="h-4.5 w-4.5 text-[#cbd5e1] group-hover:text-[#ef4444] transition-colors" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Link
+              href="/settings"
+              className="h-8.5 w-8.5 rounded-xl bg-white/5 border border-[rgba(255,255,255,0.08)] hover:bg-white/10 hover:border-white/20 active:scale-[0.95] transition-all flex items-center justify-center"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <Settings className="h-4.5 w-4.5 text-[#cbd5e1] hover:text-white" />
+            </Link>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="h-8.5 w-8.5 rounded-xl bg-white/5 border border-[rgba(255,255,255,0.08)] hover:bg-[#ef4444]/10 hover:border-[#ef4444]/30 active:scale-[0.95] group transition-all flex items-center justify-center shrink-0"
+              title="Sign out"
+              aria-label="Sign out"
+            >
+              <LogOut className="h-4.5 w-4.5 text-[#cbd5e1] group-hover:text-[#ef4444] transition-colors" />
+            </button>
+          </div>
         </div>
       </aside>
 
@@ -239,6 +279,7 @@ export function SidebarShell({ children }: SidebarShellProps) {
           >
             <span>🪙 {studentCredits}</span>
           </div>
+          <NotificationCenter />
           <button
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
             type="button"
@@ -288,6 +329,21 @@ export function SidebarShell({ children }: SidebarShellProps) {
               </div>
             </div>
 
+            {/* Community */}
+            <div>
+              <span className="text-[8px] font-extrabold uppercase tracking-widest text-[#8b5cf6]/70 block mb-2 px-2">Community</span>
+              <div className="space-y-1">
+                {communityItems.map((item) => (
+                  <NavItem
+                    key={item.path}
+                    item={item}
+                    isActive={pathname === item.path}
+                    onClick={() => setMobileMenuOpen(false)}
+                  />
+                ))}
+              </div>
+            </div>
+
             {/* Admin Panel */}
             {userRole === "admin" && (
               <div className="pt-2 border-t border-[rgba(255,255,255,0.04)]">
@@ -305,8 +361,21 @@ export function SidebarShell({ children }: SidebarShellProps) {
               </div>
             )}
 
-            {/* Verification + Logout */}
+            {/* Verification + Settings + Logout */}
             <div className="pt-2 border-t border-[rgba(255,255,255,0.04)] space-y-1">
+              <Link
+                href="/settings"
+                onClick={() => setMobileMenuOpen(false)}
+                className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
+                  pathname === "/settings"
+                    ? "bg-[var(--color-primary-tint)] text-white"
+                    : "text-[#cbd5e1] hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                <Settings className="h-5 w-5 text-primary" />
+                <span>Settings</span>
+              </Link>
+
               <Link
                 href="/verification"
                 onClick={() => setMobileMenuOpen(false)}
@@ -335,6 +404,7 @@ export function SidebarShell({ children }: SidebarShellProps) {
 
       {/* 3. Main Workspace Container */}
       <div className="flex-1 min-w-0 flex flex-col">
+        {isDemo && <DemoBanner />}
         {children}
       </div>
     </div>

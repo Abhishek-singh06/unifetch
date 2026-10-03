@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { DollarSign, ArrowRight } from "lucide-react";
 import { useTransition, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, getDemoOutsideRequests } from "@/lib/demoSession";
 import { SidebarShell } from "../../components/SidebarShell";
 import { Alert } from "../../components/ui/Alert";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -39,6 +40,18 @@ export default function OutsidePaymentsPage() {
     async function loadPayments() {
       setErrorMessage("");
 
+      if (isDemoMode()) {
+        const demoUser = getDemoUser();
+        setCurrentUserId(demoUser.id);
+        const demoReqs = getDemoOutsideRequests();
+        const demoPayments = (demoReqs as unknown as PaymentRequest[]).filter(
+          (p) => (p.requester_id === demoUser.id || p.carrier_id === demoUser.id) && p.final_reward !== null
+        );
+        setPayments(demoPayments);
+        setLoading(false);
+        return;
+      }
+
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         router.push("/login");
@@ -69,6 +82,8 @@ export default function OutsidePaymentsPage() {
     }
 
     loadPayments();
+
+    if (isDemoMode()) return;
 
     const channel = supabase
       .channel("outside-payments-channel")

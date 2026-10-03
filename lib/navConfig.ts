@@ -16,6 +16,8 @@ import {
   MessageSquare,
   CreditCard,
   ShieldCheck,
+  Megaphone,
+  ShieldAlert,
 } from "lucide-react";
 
 export type NavItem = {
@@ -33,9 +35,10 @@ export type NavSection = {
 
 // Section color tokens — matches globals.css design system
 export const SECTION_COLORS = {
-  primary: "#2563eb", // blue-600 — Within College
-  emerald: "#10b981", // emerald-500 — Outside Campus
-  danger: "#ef4444", // red-500 — Admin Panel
+  primary: "#2563eb",  // blue-600 — Within College
+  emerald: "#10b981",  // emerald-500 — Outside Campus
+  violet: "#8b5cf6",   // violet-500 — Community
+  danger: "#ef4444",   // red-500 — Admin Panel
 } as const;
 
 export const withinCollegeItems: NavItem[] = [
@@ -98,6 +101,15 @@ export const outsideCampusItems: NavItem[] = [
   },
 ];
 
+export const communityItems: NavItem[] = [
+  {
+    path: "/broadcast",
+    label: "Broadcasts",
+    icon: Megaphone,
+    sectionColor: SECTION_COLORS.violet,
+  },
+];
+
 export const adminItems: NavItem[] = [
   {
     path: "/admin",
@@ -111,10 +123,23 @@ export const adminItems: NavItem[] = [
     icon: Coins,
     sectionColor: SECTION_COLORS.danger,
   },
+  {
+    path: "/admin/payment",
+    label: "Payment Settings",
+    icon: CreditCard,
+    sectionColor: SECTION_COLORS.danger,
+  },
+  {
+    path: "/admin/reports",
+    label: "User Reports",
+    icon: ShieldAlert,
+    sectionColor: SECTION_COLORS.danger,
+  },
 ];
 
 export const navSections: NavSection[] = [
   { title: "Within College", items: withinCollegeItems },
   { title: "Outside Campus", items: outsideCampusItems },
+  { title: "Community", items: communityItems },
   { title: "Admin Panel", items: adminItems },
 ];

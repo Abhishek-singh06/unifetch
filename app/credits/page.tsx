@@ -4,10 +4,13 @@ import { useEffect, useState } from "react";
 import { Coins, ShieldCheck, CreditCard, CheckCircle, Upload, Clock, XCircle, Info } from "lucide-react";
 import { useSpring, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, updateDemoUserCredits } from "@/lib/demoSession";
 import { SidebarShell } from "../components/SidebarShell";
 import { Button } from "../components/ui/Button";
 import { Alert } from "../components/ui/Alert";
-import { CREDIT_PRICING_PACKAGES, ADMIN_UPI_ID, ADMIN_UPI_NAME } from "@/lib/config";
+import { CREDIT_PRICING_PACKAGES } from "@/lib/config";
+import TrialRestrictedModal from "../components/ui/TrialRestrictedModal";
+import PendingVerificationModal from "../components/ui/PendingVerificationModal";
 
 type CreditPurchase = {
   id: string;
@@ -32,8 +35,32 @@ export default function BuyCreditsPage() {
   const [purchases, setPurchases] = useState<CreditPurchase[]>([]);
   const [message, setMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
+  const [showTrialModal, setShowTrialModal] = useState<boolean>(false);
+  const [showPendingModal, setShowPendingModal] = useState<boolean>(false);
+
+  function handleTrialContinueSimulate() {
+    setShowTrialModal(false);
+    const pkg = CREDIT_PRICING_PACKAGES[selectedPackage];
+    updateDemoUserCredits(pkg.credits);
+    setMessage(`🎉 [Demo Simulation] Added ${pkg.credits} demo credits to your wallet.`);
+    setPaymentRef("");
+    setFile(null);
+    setFilePreview(null);
+    loadData();
+  }
+
+  const [upiId, setUpiId] = useState<string>("");
+  const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function loadData() {
+    if (isDemoMode()) {
+      setCredits(getDemoUser().credits || 100);
+      setUpiId("unifetch.demo@okhdfcbank");
+      setLoading(false);
+      return;
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
@@ -46,6 +73,28 @@ export default function BuyCreditsPage() {
 
     if (profile) {
       setCredits(profile.credits || 0);
+    }
+
+    // Load current payment settings
+    const { data: settings } = await supabase
+      .from("payment_settings")
+      .select("*")
+      .eq("id", "00000000-0000-0000-0000-000000000000")
+      .maybeSingle();
+
+    if (settings) {
+      setUpiId(settings.upi_id);
+      if (settings.qr_image_path) {
+        const { data } = supabase.storage
+          .from("payment-settings")
+          .getPublicUrl(settings.qr_image_path);
+        setQrCodeUrl(data.publicUrl);
+      } else {
+        setQrCodeUrl(null);
+      }
+    } else {
+      setUpiId("");
+      setQrCodeUrl(null);
     }
 
     // Get past purchases
@@ -86,6 +135,14 @@ export default function BuyCreditsPage() {
 
     setPurchasing(true);
 
+    const pkg = CREDIT_PRICING_PACKAGES[selectedPackage];
+
+    if (isDemoMode()) {
+      setPurchasing(false);
+      setShowTrialModal(true);
+      return;
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setErrorMessage("Please sign in to buy credits.");
@@ -93,7 +150,23 @@ export default function BuyCreditsPage() {
       return;
     }
 
-    const pkg = CREDIT_PRICING_PACKAGES[selectedPackage];
+    const { data: profile } = await supabase
+      .from("profiles")
+      .select("verification_status")
+      .eq("id", user.id)
+      .single();
+
+    if (
+      profile &&
+      profile.verification_status !== "approved" &&
+      profile.verification_status !== "verified" &&
+      profile.verification_status !== "submitted" &&
+      profile.verification_status !== "id_submitted"
+    ) {
+      setPurchasing(false);
+      setShowPendingModal(true);
+      return;
+    }
 
     try {
       let proofUrlPath = null;
@@ -116,8 +189,8 @@ export default function BuyCreditsPage() {
         proofUrlPath = filePath;
       }
 
-      // Call Supabase RPC buy_credits
-      const { data: success, error: rpcError } = await supabase.rpc("buy_credits", {
+      // Call Supabase RPC buy_credits (returns UUID purchase_id)
+      const { data: purchaseId, error: rpcError } = await supabase.rpc("buy_credits", {
         p_credits: pkg.credits,
         p_payment_reference: paymentRef.trim(),
         p_payment_proof_url: proofUrlPath
@@ -127,7 +200,7 @@ export default function BuyCreditsPage() {
         throw new Error(rpcError.message);
       }
 
-      if (success) {
+      if (purchaseId) {
         setMessage("🎉 Payment details submitted successfully! Your request is pending admin verification.");
         setPaymentRef("");
         setFile(null);
@@ -171,8 +244,6 @@ export default function BuyCreditsPage() {
   }
 
   const activePackage = CREDIT_PRICING_PACKAGES[selectedPackage];
-  const upiUrl = `upi://pay?pa=${ADMIN_UPI_ID}&pn=${encodeURIComponent(ADMIN_UPI_NAME)}&cu=INR&am=${activePackage.price}`;
-  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(upiUrl)}`;
 
   return (
     <SidebarShell>
@@ -239,84 +310,114 @@ export default function BuyCreditsPage() {
               </div>
 
               {/* Pay QR Block */}
-              <div className="border border-[rgba(255,255,255,0.08)] rounded-2xl p-6 bg-[#03060c] flex flex-col sm:flex-row items-center gap-6">
-                <div className="bg-white p-3 rounded-2xl shrink-0 shadow-lg">
-                  <img src={qrCodeUrl} alt="UPI Payment QR Code" className="w-[180px] h-[180px]" />
-                </div>
-                <div className="space-y-3 text-center sm:text-left">
-                  <span className="text-[9px] font-extrabold tracking-widest text-[#2563eb] uppercase block">2. Scan and Pay</span>
-                  <h4 className="font-display font-bold text-white text-lg">Pay exactly ₹{activePackage.price}</h4>
-                  <p className="text-xs text-[#cbd5e1] font-medium leading-relaxed max-w-[280px]">
-                    Use any UPI App (GPay, PhonePe, Paytm, etc.) to scan the QR and complete your payment to the site admin.
+              {!upiId ? (
+                <div className="border border-[rgba(255,255,255,0.08)] rounded-2xl p-8 bg-[#03060c]/50 text-center space-y-2">
+                  <Info className="h-8 w-8 text-[#2563eb] mx-auto opacity-50" />
+                  <p className="text-xs font-bold text-[#cbd5e1] uppercase tracking-wider">
+                    Credit payment details haven&apos;t been configured yet.
                   </p>
-                  <div className="pt-2">
-                    <span className="text-[8px] font-bold text-muted block uppercase">UPI ID</span>
-                    <span className="font-mono text-xs font-bold text-white bg-white/5 px-3 py-1.5 rounded-lg select-all border border-white/5 mt-1 block w-fit mx-auto sm:mx-0">
-                      {ADMIN_UPI_ID}
-                    </span>
-                  </div>
                 </div>
-              </div>
-
-              {/* Verification Form */}
-              <form onSubmit={handleBuyCredits} className="space-y-5 pt-2">
-                <span className="text-[9px] font-extrabold tracking-widest text-[#2563eb] uppercase block">3. Submit Payment Verification</span>
-                
-                <div className="space-y-2">
-                  <label className="field-label font-bold text-[10px] text-[#cbd5e1] uppercase">
-                    UPI Transaction ID / Ref No / UTR <span className="text-danger">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Enter 12-digit UPI reference number"
-                    value={paymentRef}
-                    onChange={(e) => setPaymentRef(e.target.value)}
-                    className="w-full rounded-xl bg-white/5 border border-[rgba(255,255,255,0.08)] px-4 py-3 text-xs text-white placeholder-muted focus:border-primary focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="field-label font-bold text-[10px] text-[#cbd5e1] uppercase">
-                    Upload Payment Screenshot <span className="text-[#888]">(Optional)</span>
-                  </label>
-                  <div className="flex flex-col sm:flex-row items-center gap-4">
-                    <label className="flex items-center gap-2 border border-dashed border-[rgba(255,255,255,0.15)] bg-white/5 hover:bg-white/8 transition duration-200 text-white rounded-xl px-5 py-3 cursor-pointer text-xs font-bold w-full sm:w-auto text-center justify-center">
-                      <Upload className="h-4.5 w-4.5 text-primary" />
-                      Choose File
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleFileChange}
-                        className="hidden"
-                      />
-                    </label>
-                    {file && (
-                      <span className="text-xs font-semibold text-white truncate max-w-[200px]">
-                        {file.name}
-                      </span>
-                    )}
-                  </div>
-                  {filePreview && (
-                    <div className="mt-3 p-2 bg-[#03060c] border border-white/5 rounded-xl max-w-[200px]">
-                      <img src={filePreview} alt="Screenshot Preview" className="rounded-lg object-contain w-full h-[120px]" />
+              ) : (
+                <>
+                  <div className="border border-[rgba(255,255,255,0.08)] rounded-2xl p-6 bg-[#03060c] flex flex-col sm:flex-row items-center gap-6">
+                    <div className="bg-white p-3 rounded-2xl shrink-0 shadow-lg">
+                      {qrCodeUrl ? (
+                        <img src={qrCodeUrl} alt="UPI Payment QR Code" className="w-[180px] h-[180px]" />
+                      ) : (
+                        <div className="w-[180px] h-[180px] flex items-center justify-center bg-[#05070b]">
+                          <span className="text-[10px] text-muted font-bold uppercase">No QR code uploaded</span>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                    <div className="space-y-3 text-center sm:text-left flex-1">
+                      <span className="text-[9px] font-extrabold tracking-widest text-[#2563eb] uppercase block">2. Scan and Pay</span>
+                      <h4 className="font-display font-bold text-white text-lg">Pay exactly ₹{activePackage.price}</h4>
+                      <p className="text-xs text-[#cbd5e1] font-medium leading-relaxed max-w-[280px]">
+                        Use any UPI App (GPay, PhonePe, Paytm, etc.) to scan the QR and complete your payment to the site admin.
+                      </p>
+                      <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-end gap-2.5">
+                        <div className="flex-1">
+                          <span className="text-[8px] font-bold text-muted block uppercase">UPI ID</span>
+                          <span className="font-mono text-xs font-bold text-white bg-white/5 px-3 py-1.5 rounded-lg select-all border border-white/5 mt-1 block truncate">
+                            {upiId}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(upiId);
+                            setCopied(true);
+                            setTimeout(() => setCopied(false), 2000);
+                          }}
+                          className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/5 text-[9px] font-bold uppercase text-white hover:bg-white/10 shrink-0 transition-colors"
+                        >
+                          {copied ? "Copied!" : "Copy UPI ID"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
 
-                {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
-                {message && <Alert tone="success">{message}</Alert>}
+                  {/* Verification Form */}
+                  <form onSubmit={handleBuyCredits} className="space-y-5 pt-2">
+                    <span className="text-[9px] font-extrabold tracking-widest text-[#2563eb] uppercase block">3. Submit Payment Verification</span>
+                    
+                    <div className="space-y-2">
+                      <label className="field-label font-bold text-[10px] text-[#cbd5e1] uppercase">
+                        UPI Transaction ID / Ref No / UTR <span className="text-danger">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="Enter 12-digit UPI reference number"
+                        value={paymentRef}
+                        onChange={(e) => setPaymentRef(e.target.value)}
+                        className="w-full rounded-xl bg-white/5 border border-[rgba(255,255,255,0.08)] px-4 py-3 text-xs text-white placeholder-muted focus:border-primary focus:outline-none"
+                      />
+                    </div>
 
-                <Button
-                  type="submit"
-                  size="lg"
-                  disabled={purchasing}
-                  className="w-full flex items-center justify-center gap-2 uppercase tracking-wider text-xs font-bold py-3.5 shadow-glow"
-                >
-                  <CreditCard className="h-4 w-4" />
-                  <span>{purchasing ? "Submitting Request..." : `Submit Verification`}</span>
-                </Button>
-              </form>
+                    <div className="space-y-2">
+                      <label className="field-label font-bold text-[10px] text-[#cbd5e1] uppercase">
+                        Upload Payment Screenshot <span className="text-[#888]">(Optional)</span>
+                      </label>
+                      <div className="flex flex-col sm:flex-row items-center gap-4">
+                        <label className="flex items-center gap-2 border border-dashed border-[rgba(255,255,255,0.15)] bg-white/5 hover:bg-white/8 transition duration-200 text-white rounded-xl px-5 py-3 cursor-pointer text-xs font-bold w-full sm:w-auto text-center justify-center">
+                          <Upload className="h-4.5 w-4.5 text-primary" />
+                          Choose File
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleFileChange}
+                            className="hidden"
+                          />
+                        </label>
+                        {file && (
+                          <span className="text-xs font-semibold text-white truncate max-w-[200px]">
+                            {file.name}
+                          </span>
+                        )}
+                      </div>
+                      {filePreview && (
+                        <div className="mt-3 p-2 bg-[#03060c] border border-white/5 rounded-xl max-w-[200px]">
+                          <img src={filePreview} alt="Screenshot Preview" className="rounded-lg object-contain w-full h-[120px]" />
+                        </div>
+                      )}
+                    </div>
+
+                    {errorMessage && <Alert tone="error">{errorMessage}</Alert>}
+                    {message && <Alert tone="success">{message}</Alert>}
+
+                    <Button
+                      type="submit"
+                      size="lg"
+                      disabled={purchasing}
+                      className="w-full flex items-center justify-center gap-2 uppercase tracking-wider text-xs font-bold py-3.5 shadow-glow"
+                    >
+                      <CreditCard className="h-4 w-4" />
+                      <span>{purchasing ? "Submitting Request..." : `Submit Verification`}</span>
+                    </Button>
+                  </form>
+                </>
+              )}
 
             </div>
 
@@ -431,6 +532,19 @@ export default function BuyCreditsPage() {
           </div>
         </div>
       </div>
+
+      <TrialRestrictedModal
+        isOpen={showTrialModal}
+        onClose={handleTrialContinueSimulate}
+        actionName="Purchase Campus Credits"
+        description="Trial users can view the credits pricing and wallet interface, but real UPI payments and credit top-ups require an authenticated account."
+      />
+
+      <PendingVerificationModal
+        isOpen={showPendingModal}
+        onClose={() => setShowPendingModal(false)}
+        actionName="Purchase Campus Credits"
+      />
     </SidebarShell>
   );
 }

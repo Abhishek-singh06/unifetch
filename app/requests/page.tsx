@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Copy, Check, Calendar, MapPin, Package, Inbox } from "lucide-react";
 import { useTransition, animated } from "@react-spring/web";
 import { supabase } from "@/lib/supabase/client";
+import { isDemoMode, getDemoUser, getDemoPackages } from "@/lib/demoSession";
 import { SidebarShell } from "../components/SidebarShell";
 import { Button } from "../components/ui/Button";
 import { Alert } from "../components/ui/Alert";
@@ -14,6 +15,7 @@ import { StatusBadge } from "../components/ui/StatusBadge";
 
 type PackageRequest = {
   id: string;
+  requester_id?: string;
   package_description: string;
   pickup_location: string;
   delivery_location: string;
@@ -38,6 +40,22 @@ export default function RequestsPage() {
 
     async function loadRequests() {
       setErrorMessage("");
+
+      if (isDemoMode()) {
+        const demoUser = getDemoUser();
+        const demoPkgs = getDemoPackages();
+        const myRequests = (demoPkgs as unknown as PackageRequest[]).filter(
+          (p) => p.requester_id === demoUser.id
+        );
+        setRequests(myRequests);
+        const demoOtps: Record<string, string> = {};
+        demoPkgs.forEach((p) => {
+          if (p.otp) demoOtps[p.id] = p.otp;
+        });
+        setOtps(demoOtps);
+        setIsLoading(false);
+        return;
+      }
 
       const {
         data: { user },
@@ -88,6 +106,8 @@ export default function RequestsPage() {
 
     loadRequests();
 
+    if (isDemoMode()) return;
+
     const channel = supabase
       .channel("user-requests-channel")
       .on(
@@ -113,6 +133,13 @@ export default function RequestsPage() {
     if (!confirm("Are you sure you want to cancel this request?")) return;
 
     setCancelingId(requestId);
+
+    if (isDemoMode()) {
+      setRequests((prev) => prev.filter((r) => r.id !== requestId));
+      setCancelingId(null);
+      return;
+    }
+
     const { error } = await supabase
       .from("package_requests")
       .delete()
@@ -173,14 +200,14 @@ export default function RequestsPage() {
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="text-xs font-bold uppercase tracking-widest text-[#2563eb]">Within College</span>
               <span className="text-[9px] bg-[#2563eb]/15 text-primary border border-[#2563eb]/30 px-2.5 py-0.5 rounded-full font-extrabold uppercase tracking-wider">
-                Payment Type: UniFetch Credits
+                CREDITS ONLY • NO CASH
               </span>
             </div>
             <h1 className="mt-2 font-display text-4xl font-extrabold tracking-tight text-white leading-none">
-              Package Requests Pipeline
+              My Campus Requests
             </h1>
             <p className="mt-2 text-xs text-[#cbd5e1] font-semibold">
-              Track packages waiting at campus gates or heading to your hostel block in real-time.
+              Track things you&apos;ve asked other students to carry for you.
             </p>
           </div>
 
@@ -197,10 +224,10 @@ export default function RequestsPage() {
           <EmptyState
             icon={<Inbox className="h-10 w-10 text-primary animate-pulse" />}
             title="No active package requests"
-            description="Have a parcel waiting at the gate? Create your first request in seconds."
+            description="Need something carried across campus? Ask a student to help."
             action={
               <Link href="/request" className="neo-btn-primary px-7 py-3.5 text-xs font-extrabold uppercase tracking-widest shadow-glow">
-                Post a Gate Pickup →
+                Create Campus Request
               </Link>
             }
           />
@@ -248,7 +275,7 @@ export default function RequestsPage() {
                       {/* Timeline status bar */}
                       <div className="mt-5 pt-1">
                         <div className="flex justify-between text-[9px] font-extrabold text-[#cbd5e1] mb-2 uppercase tracking-widest leading-none">
-                          <span>Progress status</span>
+                          <span>Status</span>
                           <span>{isDelivered ? "100%" : isMatched ? "66%" : "33%"}</span>
                         </div>
                         <div className="h-2 w-full bg-[#05070b]/60 border border-[rgba(255,255,255,0.06)] rounded-full overflow-hidden">
@@ -256,6 +283,11 @@ export default function RequestsPage() {
                             className="h-full bg-[#2563eb] rounded-full transition-all duration-300 shadow-glow animate-pulse-slow"
                             style={{ width: isDelivered ? "100%" : isMatched ? "66%" : "33%" }}
                           />
+                        </div>
+                        <div className="mt-2 flex justify-between text-[8px] font-bold text-[#cbd5e1]/60 uppercase tracking-wider">
+                          <span>Waiting for carrier</span>
+                          <span>Carrier en route</span>
+                          <span>Delivered ✓</span>
                         </div>
                       </div>
 
